@@ -1,0 +1,45 @@
+# Generic
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.DS_Store
+
+# Env
+.env
+.env.*
+!.env.example
+
+# uv / venv
+.venv/
+.uv/
+
+# Distribution
+dist/
+build/
+*.egg-info/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# Pyright / ruff cache
+.ruff_cache/
+.pyright/
+pyrightconfig.json
+
+# Test / coverage
+.pytest_cache/
+.coverage
+htmlcov/
+coverage.xml
+
+# Alembic
+alembic/versions/*.py
+
+# OpenAPI export
+openapi.json
+
+# Logs
+*.log
