@@ -1,7 +1,9 @@
+import pathlib
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
@@ -18,7 +20,17 @@ limiter = Limiter(key_func=get_remote_address)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # startup
+    # startup: seed roles & permissions
+    try:
+        from app.core.database import AsyncSessionLocal
+        from app.core.seed import seed_permissions, seed_roles
+
+        async with AsyncSessionLocal() as db:
+            await seed_permissions(db)
+            await seed_roles(db)
+    except Exception:
+        # Don't fail startup if DB is unavailable (e.g., tests)
+        pass
     yield
     # shutdown
 
@@ -35,6 +47,10 @@ app.state.limiter = limiter
 # Exception handlers
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 app.add_exception_handler(AppException, app_exception_handler)  # type: ignore[arg-type]
+
+# Static files for avatars
+pathlib.Path("static/avatars").mkdir(parents=True, exist_ok=True)
+app.mount("/static", StaticFiles(directory="static"), name="static")
 
 # Middlewares (order matters — outermost = last added)
 app.add_middleware(SlowAPIMiddleware)
