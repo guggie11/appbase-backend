@@ -1,6 +1,6 @@
 """Token models: RefreshToken, LoginAttempt."""
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 
 from sqlalchemy import Boolean, DateTime, ForeignKey, String, Text, Uuid
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -23,7 +23,10 @@ class RefreshToken(Base):
     ip_address: Mapped[str | None] = mapped_column(String(45), nullable=True)
     user_agent: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=False), server_default="now()", nullable=False
+        DateTime(timezone=False),
+        default=lambda: datetime.now(UTC).replace(tzinfo=None),
+        server_default="now()",
+        nullable=False,
     )
 
     user: Mapped["User"] = relationship(back_populates="refresh_tokens")  # type: ignore[name-defined]  # noqa: F821
@@ -39,7 +42,10 @@ class LoginAttempt(Base):
     ip_address: Mapped[str | None] = mapped_column(String(45), nullable=True)
     success: Mapped[bool] = mapped_column(Boolean, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=False), server_default="now()", nullable=False
+        DateTime(timezone=False),
+        default=lambda: datetime.now(UTC).replace(tzinfo=None),
+        server_default="now()",
+        nullable=False,
     )
 
 

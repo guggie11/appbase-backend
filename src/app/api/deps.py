@@ -1,4 +1,5 @@
 """FastAPI dependencies."""
+import uuid as _uuid
 from collections.abc import AsyncGenerator
 
 from fastapi import Depends, HTTPException, status
@@ -56,9 +57,14 @@ def require_permission(permission_slug: str):
         from app.core.exceptions import AppException
         from app.models.rbac import Permission, Role, RolePermission, UserRole
 
-        user_id = current_user.get("sub")
-        if not user_id:
+        user_id_str = current_user.get("sub")
+        if not user_id_str:
             raise AppException(code="FORBIDDEN", message="Akses ditolak", status_code=403)
+
+        try:
+            user_id = _uuid.UUID(user_id_str)
+        except (ValueError, AttributeError):
+            raise AppException(code="FORBIDDEN", message="Akses ditolak", status_code=403) from None
 
         # Load user's roles
         result = await db.execute(
