@@ -5,12 +5,15 @@ import uuid
 from fastapi import APIRouter, Cookie, Depends, Request, Response
 from slowapi import Limiter
 from slowapi.util import get_remote_address
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db
 from app.api.v1.auth import email as email_service
 from app.api.v1.auth import service
 from app.core.audit import log_action
+from app.core.redis import redis_client
+from app.models.token import RefreshToken
 from app.schemas.auth import (
     ForgotPasswordRequest,
     LoginRequest,
@@ -107,6 +110,54 @@ async def logout(
     response.delete_cookie("refresh_token")
     response.delete_cookie("csrf_token")
     return SuccessResponse(data=None, message="Logout berhasil")
+
+
+@router.post("/logout-all", response_model=SuccessResponse[dict])
+async def logout_all(
+    request: Request,
+    response: Response,
+    payload: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Revoke all active sessions for the current user."""
+    user_id = uuid.UUID(payload["sub"])
+    jti = payload.get("jti")
+    token_exp = payload.get("exp", 0)
+
+    # Blacklist current access token
+    if jti:
+        now_ts = int(service._now().timestamp())
+        ttl = max(token_exp - now_ts, 1)
+        await redis_client.setex(f"blacklist:{jti}", ttl, "1")
+
+    # Count active refresh tokens before revoking
+    count_result = await db.execute(
+        select(RefreshToken).where(
+            RefreshToken.user_id == user_id,
+            RefreshToken.revoked_at.is_(None),
+        )
+    )
+    sessions_revoked = len(count_result.scalars().all())
+
+    # Bulk-revoke all active refresh tokens
+    if sessions_revoked > 0:
+        now = service._now()
+        await db.execute(
+            update(RefreshToken)
+            .where(
+                RefreshToken.user_id == user_id,
+                RefreshToken.revoked_at.is_(None),
+            )
+            .values(revoked_at=now)
+        )
+        await db.commit()
+
+    response.delete_cookie("refresh_token")
+    response.delete_cookie("csrf_token")
+    return SuccessResponse(
+        data={"sessions_revoked": sessions_revoked},
+        message="Semua sesi berhasil diakhiri",
+    )
 
 
 @router.post("/refresh", response_model=SuccessResponse[dict])

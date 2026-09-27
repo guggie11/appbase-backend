@@ -14,6 +14,7 @@ from app.core.config import settings
 from app.core.exceptions import AppException, app_exception_handler
 from app.middleware.correlation import CorrelationIdMiddleware
 from app.middleware.csrf import CSRFMiddleware
+from app.middleware.security_headers import SecurityHeadersMiddleware
 
 limiter = Limiter(key_func=get_remote_address)
 
@@ -55,6 +56,7 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 
 # Middlewares (order matters — outermost = last added)
 app.add_middleware(SlowAPIMiddleware)
+app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(CSRFMiddleware)
 app.add_middleware(CorrelationIdMiddleware)
 app.add_middleware(
