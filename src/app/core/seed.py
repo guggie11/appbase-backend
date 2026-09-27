@@ -16,6 +16,11 @@ SEED_PERMISSIONS = [
     {"slug": "roles.delete", "name": "Delete Roles", "module": "roles", "action": "delete"},
     {"slug": "permissions.read", "name": "Read Permissions", "module": "permissions", "action": "read"},
     {"slug": "permissions.assign", "name": "Assign Permissions", "module": "permissions", "action": "assign"},
+    # Phase 3: Menu Management
+    {"slug": "menu.read", "name": "Read Menus", "module": "menu", "action": "read"},
+    {"slug": "menu.manage", "name": "Manage Menus", "module": "menu", "action": "manage"},
+    # Phase 3: Dashboard
+    {"slug": "dashboard.read", "name": "Read Dashboard", "module": "dashboard", "action": "read"},
 ]
 
 SEED_ROLES = [
