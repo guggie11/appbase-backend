@@ -23,11 +23,12 @@ async def lifespan(app: FastAPI):
     # startup: seed roles & permissions
     try:
         from app.core.database import AsyncSessionLocal
-        from app.core.seed import seed_permissions, seed_roles
+        from app.core.seed import seed_permissions, seed_roles, seed_settings
 
         async with AsyncSessionLocal() as db:
             await seed_permissions(db)
             await seed_roles(db)
+            await seed_settings(db)
     except Exception:
         # Don't fail startup if DB is unavailable (e.g., tests)
         pass

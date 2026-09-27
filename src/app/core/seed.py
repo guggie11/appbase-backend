@@ -1,4 +1,4 @@
-"""Seed data: default roles and permissions."""
+"""Seed data: default roles, permissions, and app settings."""
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -21,11 +21,24 @@ SEED_PERMISSIONS = [
     {"slug": "menu.manage", "name": "Manage Menus", "module": "menu", "action": "manage"},
     # Phase 3: Dashboard
     {"slug": "dashboard.read", "name": "Read Dashboard", "module": "dashboard", "action": "read"},
+    # Phase 4: Audit Log, Settings, Profile
+    {"slug": "audit.read", "name": "Read Audit Logs", "module": "audit", "action": "read"},
+    {"slug": "settings.read", "name": "Read Settings", "module": "settings", "action": "read"},
+    {"slug": "settings.manage", "name": "Manage Settings", "module": "settings", "action": "manage"},
+    {"slug": "profile.update", "name": "Update Profile", "module": "profile", "action": "update"},
 ]
 
 SEED_ROLES = [
     {"name": "Super Admin", "slug": "super-admin", "description": "Full system access", "is_system": True},
     {"name": "User", "slug": "user", "description": "Standard user", "is_system": True},
+]
+
+SEED_SETTINGS = [
+    {"key": "app_name", "value": "Appbase", "type": "string", "is_public": True, "is_secret": False},
+    {"key": "app_version", "value": "1.0.0", "type": "string", "is_public": True, "is_secret": False},
+    {"key": "max_login_attempts", "value": "5", "type": "number", "is_public": False, "is_secret": False},
+    {"key": "lockout_duration_minutes", "value": "15", "type": "number", "is_public": False, "is_secret": False},
+    {"key": "smtp_host", "value": "localhost", "type": "string", "is_public": False, "is_secret": True},
 ]
 
 
@@ -46,4 +59,17 @@ async def seed_roles(db: AsyncSession) -> None:
         if not existing:
             role = Role(**rdata)
             db.add(role)
+    await db.commit()
+
+
+async def seed_settings(db: AsyncSession) -> None:
+    from app.models.audit import AppSetting
+
+    for sdata in SEED_SETTINGS:
+        result = await db.execute(select(AppSetting).where(AppSetting.key == sdata["key"]))
+        existing = result.scalar_one_or_none()
+        if not existing:
+            import uuid
+            setting = AppSetting(id=uuid.uuid4(), **sdata)
+            db.add(setting)
     await db.commit()
