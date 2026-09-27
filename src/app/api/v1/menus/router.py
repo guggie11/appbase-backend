@@ -1,13 +1,15 @@
 """Menu management router — S-055 CRUD + S-056 Dynamic menu."""
 from __future__ import annotations
 
+import contextlib
 import uuid
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db, require_permission
 from app.api.v1.menus import service
+from app.core.audit import log_action
 from app.schemas.menu import (
     AssignMenuRolesRequest,
     CreateMenuRequest,
@@ -73,8 +75,9 @@ async def get_menu(
 @router.post("/", summary="Create menu", status_code=201)
 async def create_menu(
     body: CreateMenuRequest,
+    request: Request,
     db: AsyncSession = Depends(get_db),
-    _: dict = Depends(require_permission("menu.manage")),
+    current_user: dict = Depends(require_permission("menu.manage")),
 ):
     menu = await service.create_menu(
         db=db,
@@ -86,6 +89,9 @@ async def create_menu(
         is_active=body.is_active,
         role_ids=body.role_ids,
     )
+    with contextlib.suppress(Exception):
+        await log_action(db, user_id=current_user.get("sub"), action="create", module="menus", entity_id=str(menu.id), new_value={"label": menu.label}, request=request)
+        await db.commit()
     return {"data": MenuResponse.model_validate(menu), "message": "Menu berhasil dibuat"}
 
 
@@ -93,8 +99,9 @@ async def create_menu(
 async def update_menu(
     menu_id: uuid.UUID,
     body: UpdateMenuRequest,
+    request: Request,
     db: AsyncSession = Depends(get_db),
-    _: dict = Depends(require_permission("menu.manage")),
+    current_user: dict = Depends(require_permission("menu.manage")),
 ):
     menu = await service.update_menu(
         db=db,
@@ -107,16 +114,23 @@ async def update_menu(
         is_active=body.is_active,
         role_ids=body.role_ids,
     )
+    with contextlib.suppress(Exception):
+        await log_action(db, user_id=current_user.get("sub"), action="update", module="menus", entity_id=str(menu_id), new_value={"label": body.label}, request=request)
+        await db.commit()
     return {"data": MenuResponse.model_validate(menu), "message": "Menu berhasil diperbarui"}
 
 
 @router.delete("/{menu_id}", summary="Delete menu (cascade children)", status_code=200)
 async def delete_menu(
     menu_id: uuid.UUID,
+    request: Request,
     db: AsyncSession = Depends(get_db),
-    _: dict = Depends(require_permission("menu.manage")),
+    current_user: dict = Depends(require_permission("menu.manage")),
 ):
     await service.delete_menu(db, menu_id)
+    with contextlib.suppress(Exception):
+        await log_action(db, user_id=current_user.get("sub"), action="delete", module="menus", entity_id=str(menu_id), request=request)
+        await db.commit()
     return {"data": None, "message": "Menu berhasil dihapus"}
 
 

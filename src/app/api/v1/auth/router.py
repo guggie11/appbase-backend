@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import get_current_user, get_db
 from app.api.v1.auth import email as email_service
 from app.api.v1.auth import service
+from app.core.audit import log_action
 from app.schemas.auth import (
     ForgotPasswordRequest,
     LoginRequest,
@@ -56,6 +57,11 @@ async def login(
     access_token, _jti, raw_refresh, user = await service.login_user(
         db, body.email, body.password, ip_address=ip, user_agent=ua
     )
+
+    # Audit: login success
+    with contextlib.suppress(Exception):
+        await log_action(db, user_id=user.id, action="login", module="auth", entity_id=str(user.id), request=request)
+        await db.commit()
 
     # Set cookies
     csrf_token = str(uuid.uuid4())

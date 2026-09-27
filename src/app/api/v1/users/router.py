@@ -2,11 +2,12 @@
 import contextlib
 import uuid
 
-from fastapi import APIRouter, Depends, File, Query, UploadFile
+from fastapi import APIRouter, Depends, File, Query, Request, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_db, require_permission
 from app.api.v1.users import service
+from app.core.audit import log_action
 from app.core.exceptions import AppException
 from app.schemas.common import PaginatedResponse, SuccessResponse
 from app.schemas.user import (
@@ -52,14 +53,20 @@ async def list_users(
 @router.post("/", response_model=SuccessResponse[UserWithRolesResponse], status_code=201)
 async def create_user(
     body: CreateUserRequest,
+    request: Request,
     db: AsyncSession = Depends(get_db),
-    _: dict = Depends(require_permission("users.create")),
+    current_user: dict = Depends(require_permission("users.create")),
 ):
     user = await service.create_user(db, name=body.name, email=body.email, role_ids=body.role_ids)
     # Send invitation email (fire and forget)
     with contextlib.suppress(Exception):
         from app.api.v1.auth.email import send_verification_email
         await send_verification_email(user.email, "invite")
+
+    with contextlib.suppress(Exception):
+        actor_id = current_user.get("sub")
+        await log_action(db, user_id=actor_id, action="create", module="users", entity_id=str(user.id), new_value={"name": user.name, "email": user.email}, request=request)
+        await db.commit()
 
     return _user_success(user, "User berhasil dibuat")
 
@@ -68,20 +75,30 @@ async def create_user(
 async def update_user(
     user_id: uuid.UUID,
     body: UpdateUserRequest,
+    request: Request,
     db: AsyncSession = Depends(get_db),
-    _: dict = Depends(require_permission("users.update")),
+    current_user: dict = Depends(require_permission("users.update")),
 ):
     user = await service.update_user(db, user_id, name=body.name, email=str(body.email) if body.email else None)
+    with contextlib.suppress(Exception):
+        actor_id = current_user.get("sub")
+        await log_action(db, user_id=actor_id, action="update", module="users", entity_id=str(user_id), new_value={"name": body.name, "email": str(body.email) if body.email else None}, request=request)
+        await db.commit()
     return _user_success(user, "User berhasil diperbarui")
 
 
 @router.delete("/{user_id}", response_model=SuccessResponse[None])
 async def delete_user(
     user_id: uuid.UUID,
+    request: Request,
     db: AsyncSession = Depends(get_db),
-    _: dict = Depends(require_permission("users.delete")),
+    current_user: dict = Depends(require_permission("users.delete")),
 ):
     await service.delete_user(db, user_id)
+    with contextlib.suppress(Exception):
+        actor_id = current_user.get("sub")
+        await log_action(db, user_id=actor_id, action="delete", module="users", entity_id=str(user_id), request=request)
+        await db.commit()
     return SuccessResponse(data=None, message="User berhasil dihapus")
 
 
@@ -89,10 +106,15 @@ async def delete_user(
 async def update_status(
     user_id: uuid.UUID,
     body: UpdateUserStatusRequest,
+    request: Request,
     db: AsyncSession = Depends(get_db),
-    _: dict = Depends(require_permission("users.update")),
+    current_user: dict = Depends(require_permission("users.update")),
 ):
     user = await service.update_status(db, user_id, body.status)
+    with contextlib.suppress(Exception):
+        actor_id = current_user.get("sub")
+        await log_action(db, user_id=actor_id, action="status_change", module="users", entity_id=str(user_id), new_value={"status": body.status}, request=request)
+        await db.commit()
     return _user_success(user, "Status user berhasil diperbarui")
 
 

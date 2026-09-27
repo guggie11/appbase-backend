@@ -1,11 +1,13 @@
 """Roles API router."""
+import contextlib
 import uuid
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_db, require_permission
 from app.api.v1.roles import service
+from app.core.audit import log_action
 from app.schemas.common import PaginatedResponse, SuccessResponse
 from app.schemas.permission import PermissionResponse
 from app.schemas.role import (
@@ -48,10 +50,14 @@ async def get_role(
 @router.post("/", response_model=SuccessResponse[RoleResponse], status_code=201)
 async def create_role(
     body: CreateRoleRequest,
+    request: Request,
     db: AsyncSession = Depends(get_db),
-    _: dict = Depends(require_permission("roles.create")),
+    current_user: dict = Depends(require_permission("roles.create")),
 ):
     role = await service.create_role(db, name=body.name, description=body.description)
+    with contextlib.suppress(Exception):
+        await log_action(db, user_id=current_user.get("sub"), action="create", module="roles", entity_id=str(role.id), new_value={"name": role.name}, request=request)
+        await db.commit()
     return SuccessResponse(data=RoleResponse.model_validate(role), message="Role berhasil dibuat")
 
 
@@ -59,22 +65,30 @@ async def create_role(
 async def update_role(
     role_id: uuid.UUID,
     body: UpdateRoleRequest,
+    request: Request,
     db: AsyncSession = Depends(get_db),
-    _: dict = Depends(require_permission("roles.update")),
+    current_user: dict = Depends(require_permission("roles.update")),
 ):
     role = await service.update_role(
         db, role_id, name=body.name, description=body.description, is_active=body.is_active
     )
+    with contextlib.suppress(Exception):
+        await log_action(db, user_id=current_user.get("sub"), action="update", module="roles", entity_id=str(role_id), new_value={"name": body.name, "is_active": body.is_active}, request=request)
+        await db.commit()
     return SuccessResponse(data=RoleResponse.model_validate(role), message="Role berhasil diperbarui")
 
 
 @router.delete("/{role_id}", response_model=SuccessResponse[None])
 async def delete_role(
     role_id: uuid.UUID,
+    request: Request,
     db: AsyncSession = Depends(get_db),
-    _: dict = Depends(require_permission("roles.delete")),
+    current_user: dict = Depends(require_permission("roles.delete")),
 ):
     await service.delete_role(db, role_id)
+    with contextlib.suppress(Exception):
+        await log_action(db, user_id=current_user.get("sub"), action="delete", module="roles", entity_id=str(role_id), request=request)
+        await db.commit()
     return SuccessResponse(data=None, message="Role berhasil dihapus")
 
 
