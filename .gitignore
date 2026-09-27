@@ -43,3 +43,4 @@ openapi.json
 
 # Logs
 *.log
+test.db

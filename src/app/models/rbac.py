@@ -1,6 +1,6 @@
 """RBAC models: Role, Permission, RolePermission, UserRole."""
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 
 from sqlalchemy import Boolean, DateTime, ForeignKey, String, Text, Uuid
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -19,7 +19,10 @@ class Permission(Base):
     module: Mapped[str] = mapped_column(String(100), nullable=False)
     action: Mapped[str] = mapped_column(String(50), nullable=False)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=False), server_default="now()", nullable=False
+        DateTime(timezone=False),
+        default=lambda: datetime.now(UTC).replace(tzinfo=None),
+        server_default="now()",
+        nullable=False,
     )
 
     role_permissions: Mapped[list["RolePermission"]] = relationship(back_populates="permission")

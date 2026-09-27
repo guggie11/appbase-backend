@@ -1,6 +1,6 @@
 """User-related models: User, EmailVerification, PasswordReset, PasswordHistory."""
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 
 from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Uuid
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -55,7 +55,10 @@ class EmailVerification(Base):
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=False), nullable=False)
     used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=False), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=False), server_default="now()", nullable=False
+        DateTime(timezone=False),
+        default=lambda: datetime.now(UTC).replace(tzinfo=None),
+        server_default="now()",
+        nullable=False,
     )
 
     user: Mapped["User"] = relationship(back_populates="email_verifications")
@@ -74,7 +77,10 @@ class PasswordReset(Base):
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=False), nullable=False)
     used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=False), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=False), server_default="now()", nullable=False
+        DateTime(timezone=False),
+        default=lambda: datetime.now(UTC).replace(tzinfo=None),
+        server_default="now()",
+        nullable=False,
     )
 
     user: Mapped["User"] = relationship(back_populates="password_resets")
@@ -91,7 +97,10 @@ class PasswordHistory(Base):
     )
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=False), server_default="now()", nullable=False
+        DateTime(timezone=False),
+        default=lambda: datetime.now(UTC).replace(tzinfo=None),
+        server_default="now()",
+        nullable=False,
     )
 
     user: Mapped["User"] = relationship(back_populates="password_histories")
