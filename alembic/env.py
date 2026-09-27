@@ -1,19 +1,40 @@
 """Alembic environment configuration."""
 import asyncio
+import sys
 from logging.config import fileConfig
+from pathlib import Path
 
 from alembic import context
 from sqlalchemy.ext.asyncio import create_async_engine
+
+# Ensure src/ is on sys.path for imports
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 config = context.config
 
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-# Import models metadata here for autogenerate support
-# from app.models import Base  # noqa: E402
-# target_metadata = Base.metadata
-target_metadata = None
+# Import all models so Alembic can detect them
+from app.models import Base  # noqa: E402
+from app.models import (  # noqa: E402, F401
+    AuditLog,
+    AppSetting,
+    EmailVerification,
+    LoginAttempt,
+    Menu,
+    MenuRole,
+    PasswordHistory,
+    PasswordReset,
+    Permission,
+    RefreshToken,
+    Role,
+    RolePermission,
+    User,
+    UserRole,
+)
+
+target_metadata = Base.metadata
 
 
 def run_migrations_offline() -> None:
@@ -28,7 +49,7 @@ def run_migrations_offline() -> None:
         context.run_migrations()
 
 
-def do_run_migrations(connection):
+def do_run_migrations(connection) -> None:
     context.configure(connection=connection, target_metadata=target_metadata)
     with context.begin_transaction():
         context.run_migrations()

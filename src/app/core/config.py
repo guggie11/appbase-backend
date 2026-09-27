@@ -13,6 +13,12 @@ class Settings(BaseSettings):
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
     CORS_ORIGINS: str = "http://localhost:5173"
 
+    # Added Phase 1
+    SMTP_HOST: str = "localhost"
+    SMTP_PORT: int = 1025
+    FRONTEND_URL: str = "http://localhost:5173"
+    ALGORITHM: str = "HS256"
+
     @property
     def cors_origins_list(self) -> list[str]:
         return [o.strip() for o in self.CORS_ORIGINS.split(",")]
