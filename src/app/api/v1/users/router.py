@@ -57,11 +57,11 @@ async def create_user(
     db: AsyncSession = Depends(get_db),
     current_user: dict = Depends(require_permission("users.create")),
 ):
-    user = await service.create_user(db, name=body.name, email=body.email, role_ids=body.role_ids)
+    user, raw_token = await service.create_user(db, name=body.name, email=body.email, role_ids=body.role_ids)
     # Send invitation email (fire and forget)
     with contextlib.suppress(Exception):
-        from app.api.v1.auth.email import send_verification_email
-        await send_verification_email(user.email, "invite")
+        from app.api.v1.auth.email import send_invitation_email
+        await send_invitation_email(user.email, raw_token)
 
     with contextlib.suppress(Exception):
         actor_id = current_user.get("sub")
