@@ -14,9 +14,22 @@ from app.schemas.menu import (
     AssignMenuRolesRequest,
     CreateMenuRequest,
     MenuResponse,
+    RoleInMenu,
     UpdateMenuOrderRequest,
     UpdateMenuRequest,
 )
+
+
+def menu_to_response(menu) -> MenuResponse:
+    """Convert Menu ORM object to MenuResponse with roles."""
+    roles = []
+    if hasattr(menu, "menu_roles") and menu.menu_roles:
+        for mr in menu.menu_roles:
+            if hasattr(mr, "role") and mr.role:
+                roles.append(RoleInMenu.model_validate(mr.role))
+    data = menu_to_response(menu)
+    data.roles = roles
+    return data
 
 router = APIRouter(prefix="/menus", tags=["menus"])
 
@@ -31,7 +44,7 @@ async def list_menus(
     _: dict = Depends(require_permission("menu.read")),
 ):
     menus = await service.list_menus(db, is_active=is_active)
-    return {"data": [MenuResponse.model_validate(m) for m in menus], "message": "Berhasil"}
+    return {"data": [menu_to_response(m) for m in menus], "message": "Berhasil"}
 
 
 @router.get("/my-menu", summary="Get menu tree for current user (S-056)")
@@ -69,7 +82,7 @@ async def get_menu(
     _: dict = Depends(require_permission("menu.read")),
 ):
     menu = await service.get_menu(db, menu_id)
-    return {"data": MenuResponse.model_validate(menu), "message": "Berhasil"}
+    return {"data": menu_to_response(menu), "message": "Berhasil"}
 
 
 @router.post("/", summary="Create menu", status_code=201)
@@ -92,7 +105,7 @@ async def create_menu(
     with contextlib.suppress(Exception):
         await log_action(db, user_id=current_user.get("sub"), action="create", module="menus", entity_id=str(menu.id), new_value={"label": menu.label}, request=request)
         await db.commit()
-    return {"data": MenuResponse.model_validate(menu), "message": "Menu berhasil dibuat"}
+    return {"data": menu_to_response(menu), "message": "Menu berhasil dibuat"}
 
 
 @router.put("/{menu_id}", summary="Update menu")
@@ -117,7 +130,7 @@ async def update_menu(
     with contextlib.suppress(Exception):
         await log_action(db, user_id=current_user.get("sub"), action="update", module="menus", entity_id=str(menu_id), new_value={"label": body.label}, request=request)
         await db.commit()
-    return {"data": MenuResponse.model_validate(menu), "message": "Menu berhasil diperbarui"}
+    return {"data": menu_to_response(menu), "message": "Menu berhasil diperbarui"}
 
 
 @router.delete("/{menu_id}", summary="Delete menu (cascade children)", status_code=200)
@@ -142,7 +155,7 @@ async def update_menu_order(
     _: dict = Depends(require_permission("menu.manage")),
 ):
     menu = await service.update_menu_order(db, menu_id, body.order_index)
-    return {"data": MenuResponse.model_validate(menu), "message": "Urutan menu berhasil diperbarui"}
+    return {"data": menu_to_response(menu), "message": "Urutan menu berhasil diperbarui"}
 
 
 @router.put("/{menu_id}/roles", summary="Assign roles to menu")
@@ -153,4 +166,4 @@ async def assign_menu_roles(
     _: dict = Depends(require_permission("menu.manage")),
 ):
     menu = await service.assign_menu_roles(db, menu_id, body.role_ids)
-    return {"data": MenuResponse.model_validate(menu), "message": "Role menu berhasil diperbarui"}
+    return {"data": menu_to_response(menu), "message": "Role menu berhasil diperbarui"}

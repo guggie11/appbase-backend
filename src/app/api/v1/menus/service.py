@@ -79,7 +79,7 @@ async def list_menus(
     db: AsyncSession,
     is_active: bool | None = None,
 ) -> list[Menu]:
-    query = select(Menu).options(selectinload(Menu.menu_roles))
+    query = select(Menu).options(selectinload(Menu.menu_roles).selectinload(MenuRole.role))
     if is_active is not None:
         query = query.where(Menu.is_active == is_active)
     query = query.order_by(Menu.order_index)
