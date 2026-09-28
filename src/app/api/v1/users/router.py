@@ -1,14 +1,22 @@
 """Users API router."""
 import contextlib
+import csv
+import io
 import uuid
+from datetime import date
 
 from fastapi import APIRouter, Depends, File, Query, Request, UploadFile
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
+from starlette.responses import StreamingResponse
 
 from app.api.deps import get_db, require_permission
 from app.api.v1.users import service
 from app.core.audit import log_action
 from app.core.exceptions import AppException
+from app.models.rbac import UserRole
+from app.models.user import User
 from app.schemas.common import PaginatedResponse, SuccessResponse
 from app.schemas.user import (
     AssignRolesRequest,
@@ -48,6 +56,46 @@ async def list_users(
         data.append(user_resp)
 
     return PaginatedResponse(data=data, total=total, page=page, per_page=per_page)
+
+
+@router.get("/export")
+async def export_users(
+    db: AsyncSession = Depends(get_db),
+    _: dict = Depends(require_permission("users.read")),
+):
+    """Export all active users as a CSV file."""
+    result = await db.execute(
+        select(User)
+        .where(User.deleted_at.is_(None))
+        .options(selectinload(User.user_roles).selectinload(UserRole.role))
+        .order_by(User.created_at.desc())
+    )
+    users = result.scalars().all()
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["id", "name", "email", "status", "roles", "is_verified", "created_at"])
+
+    for user in users:
+        roles = ", ".join([ur.role.name for ur in user.user_roles if ur.role])
+        writer.writerow([
+            str(user.id),
+            user.name,
+            user.email,
+            user.status,
+            roles,
+            user.is_verified,
+            user.created_at.isoformat(),
+        ])
+
+    output.seek(0)
+    filename = f"users_{date.today().isoformat()}.csv"
+
+    return StreamingResponse(
+        iter([output.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
 
 
 @router.post("/", response_model=SuccessResponse[UserWithRolesResponse], status_code=201)
