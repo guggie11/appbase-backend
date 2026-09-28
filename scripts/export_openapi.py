@@ -1,14 +1,14 @@
-"""Export OpenAPI schema to JSON file."""
-import json
-import sys
+#!/usr/bin/env python3
+import json, sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-sys.path.insert(0, "src")
+def export_openapi():
+    from app.main import app
+    schema = app.openapi()
+    output = Path(__file__).parent.parent / "openapi.json"
+    output.write_text(json.dumps(schema, indent=2, ensure_ascii=False))
+    print(f"Exported {len(schema.get('paths', {}))} endpoints to {output}")
 
-from app.main import app  # noqa: E402
-
-schema = app.openapi()
-output = "openapi.json"
-with open(output, "w") as f:
-    json.dump(schema, f, indent=2)
-
-print(f"OpenAPI schema exported to {output}")
+if __name__ == "__main__":
+    export_openapi()
