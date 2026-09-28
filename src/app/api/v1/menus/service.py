@@ -17,7 +17,7 @@ from app.models.rbac import Role
 async def _get_menu_or_404(db: AsyncSession, menu_id: uuid.UUID) -> Menu:
     result = await db.execute(
         select(Menu)
-        .options(selectinload(Menu.menu_roles))
+        .options(selectinload(Menu.menu_roles).selectinload(MenuRole.role))
         .where(Menu.id == menu_id)
     )
     menu = result.scalar_one_or_none()
@@ -192,30 +192,27 @@ async def update_menu(
             db.add(MenuRole(menu_id=menu_id, role_id=role_id))
 
     await db.commit()
-    await db.refresh(menu)
     await _invalidate_menu_cache()
-    return menu
+    return await _get_menu_or_404(db, menu_id)
 
 
 async def update_menu_order(db: AsyncSession, menu_id: uuid.UUID, order_index: int) -> Menu:
     menu = await _get_menu_or_404(db, menu_id)
     menu.order_index = order_index
     await db.commit()
-    await db.refresh(menu)
     await _invalidate_menu_cache()
-    return menu
+    return await _get_menu_or_404(db, menu_id)
 
 
 async def assign_menu_roles(db: AsyncSession, menu_id: uuid.UUID, role_ids: list[uuid.UUID]) -> Menu:
-    menu = await _get_menu_or_404(db, menu_id)
+    await _get_menu_or_404(db, menu_id)
     from sqlalchemy import delete
     await db.execute(delete(MenuRole).where(MenuRole.menu_id == menu_id))
     for role_id in role_ids:
         db.add(MenuRole(menu_id=menu_id, role_id=role_id))
     await db.commit()
-    await db.refresh(menu)
     await _invalidate_menu_cache()
-    return menu
+    return await _get_menu_or_404(db, menu_id)
 
 
 async def _delete_menu_recursive(db: AsyncSession, menu_id: uuid.UUID) -> None:
