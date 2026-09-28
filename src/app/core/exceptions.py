@@ -71,5 +71,13 @@ def auth_same_password() -> AppException:
     return AppException("AUTH_SAME_PASSWORD", "Password baru tidak boleh sama dengan password sebelumnya", 400)
 
 
+def auth_invalid_invitation_token() -> AppException:
+    return AppException("AUTH_INVALID_INVITATION_TOKEN", "Token undangan tidak valid atau telah digunakan", 400)
+
+
+def auth_invitation_expired() -> AppException:
+    return AppException("AUTH_INVITATION_EXPIRED", "Token undangan telah kadaluarsa", 400)
+
+
 def auth_rate_limited() -> AppException:
     return AppException("AUTH_RATE_LIMITED", "Terlalu banyak permintaan, coba lagi nanti", 429)

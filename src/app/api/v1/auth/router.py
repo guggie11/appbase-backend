@@ -15,6 +15,7 @@ from app.core.audit import log_action
 from app.core.redis import redis_client
 from app.models.token import RefreshToken
 from app.schemas.auth import (
+    AcceptInvitationRequest,
     ForgotPasswordRequest,
     LoginRequest,
     RegisterRequest,
@@ -234,6 +235,15 @@ async def resend_verification(
         data=None,
         message="Jika email terdaftar dan belum diverifikasi, email akan dikirim",
     )
+
+
+@router.post("/accept-invitation", response_model=SuccessResponse[None])
+async def accept_invitation(
+    body: AcceptInvitationRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    await service.accept_invitation(db, body.token, body.password)
+    return SuccessResponse(data=None, message="Password berhasil dibuat, silakan login")
 
 
 @router.get("/me", response_model=SuccessResponse[UserResponse])

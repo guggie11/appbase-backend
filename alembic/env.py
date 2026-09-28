@@ -31,6 +31,7 @@ from app.models import (  # noqa: E402, F401
     Role,
     RolePermission,
     User,
+    UserInvitation,
     UserRole,
 )
 

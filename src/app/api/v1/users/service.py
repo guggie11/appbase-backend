@@ -1,6 +1,8 @@
 """User management business logic service."""
+import os
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
+from hashlib import sha256
 from pathlib import Path
 
 from sqlalchemy import func, or_, select
@@ -10,7 +12,7 @@ from sqlalchemy.orm import selectinload
 from app.core.exceptions import AppException
 from app.models.rbac import Role, UserRole
 from app.models.token import RefreshToken
-from app.models.user import User
+from app.models.user import User, UserInvitation
 
 
 def _now() -> datetime:
@@ -73,7 +75,7 @@ async def create_user(
     name: str,
     email: str,
     role_ids: list[uuid.UUID],
-) -> User:
+) -> tuple[User, str]:
     # Check email uniqueness
     result = await db.execute(select(User).where(User.email == email))
     if result.scalar_one_or_none():
@@ -99,8 +101,19 @@ async def create_user(
         ur = UserRole(user_id=user.id, role_id=rid)
         db.add(ur)
 
+    # Generate invitation token
+    raw_token = os.urandom(32).hex()
+    token_hash = sha256(raw_token.encode()).hexdigest()
+    invitation = UserInvitation(
+        id=uuid.uuid4(),
+        user_id=user.id,
+        token_hash=token_hash,
+        expires_at=_now() + timedelta(days=7),
+    )
+    db.add(invitation)
+
     await db.commit()
-    return await _get_user_with_roles(db, user.id)
+    return await _get_user_with_roles(db, user.id), raw_token
 
 
 async def update_user(

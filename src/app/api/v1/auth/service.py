@@ -327,3 +327,37 @@ async def get_user_by_id(db: AsyncSession, user_id: uuid.UUID) -> User:
     if not user:
         raise exc.auth_user_not_found()
     return user
+
+
+async def accept_invitation(db: AsyncSession, token: str, new_password: str) -> None:
+    token_hash = sha256_hex(token)
+    from app.models.user import UserInvitation
+    result = await db.execute(
+        select(UserInvitation).where(
+            UserInvitation.token_hash == token_hash,
+            UserInvitation.used_at.is_(None),
+        )
+    )
+    invitation = result.scalar_one_or_none()
+
+    if not invitation:
+        raise exc.auth_invalid_invitation_token()
+
+    if invitation.expires_at < _now():
+        raise exc.auth_invitation_expired()
+
+    # Get user
+    user_result = await db.execute(select(User).where(User.id == invitation.user_id))
+    user = user_result.scalar_one_or_none()
+    if not user:
+        raise exc.auth_user_not_found()
+
+    # Update user: set password, activate, verify
+    user.password_hash = hash_password(new_password)
+    user.status = "active"
+    user.is_verified = True
+
+    # Mark invitation as used
+    invitation.used_at = _now()
+
+    await db.commit()
