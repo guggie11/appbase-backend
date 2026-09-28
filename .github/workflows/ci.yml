@@ -7,16 +7,40 @@ on:
     branches: [main, dev]
 
 jobs:
-  test:
+  ci:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v3
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
         with:
           version: "latest"
+          enable-cache: true
+      - name: Set up Python
+        run: uv python install 3.11
       - name: Install dependencies
-        run: uv sync
-      - name: Lint
-        run: uv run ruff check src tests
-      - name: Test
-        run: uv run pytest tests/
+        run: uv sync --all-extras
+      - name: Lint (ruff)
+        run: uv run ruff check src
+      - name: Test (pytest)
+        run: uv run pytest tests/ -v
+        env:
+          PYTHONPATH: src
+          DATABASE_URL: sqlite+aiosqlite:///./test.db
+          REDIS_URL: redis://localhost:6379/0
+          SECRET_KEY: test-secret-key-for-ci-only
+          ALGORITHM: HS256
+          SMTP_HOST: localhost
+          SMTP_PORT: 1025
+          FRONTEND_URL: http://localhost:5173
+      - name: Export OpenAPI schema
+        run: uv run python scripts/export_openapi.py
+        env:
+          PYTHONPATH: src
+          DATABASE_URL: sqlite+aiosqlite:///./test.db
+          REDIS_URL: redis://localhost:6379/0
+          SECRET_KEY: test-secret-key-for-ci-only
+          ALGORITHM: HS256
+          SMTP_HOST: localhost
+          SMTP_PORT: 1025
+          FRONTEND_URL: http://localhost:5173

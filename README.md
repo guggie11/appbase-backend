@@ -1,3 +1,5 @@
+[![CI](https://github.com/guggie11/appbase-backend/actions/workflows/ci.yml/badge.svg)](https://github.com/guggie11/appbase-backend/actions/workflows/ci.yml)
+
 # Appbase Backend
 
 FastAPI backend skeleton for Appbase project.
