@@ -7,6 +7,14 @@ from datetime import datetime
 from pydantic import BaseModel
 
 
+class RoleInMenu(BaseModel):
+    id: uuid.UUID
+    name: str
+    slug: str
+
+    model_config = {"from_attributes": True}
+
+
 class MenuResponse(BaseModel):
     id: uuid.UUID
     label: str
@@ -15,6 +23,7 @@ class MenuResponse(BaseModel):
     parent_id: uuid.UUID | None = None
     order_index: int
     is_active: bool
+    roles: list[RoleInMenu] = []
     created_at: datetime
     updated_at: datetime
 
