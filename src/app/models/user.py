@@ -43,6 +43,9 @@ class User(Base, TimestampMixin):
     user_invitations: Mapped[list["UserInvitation"]] = relationship(
         back_populates="user", cascade="all, delete-orphan"
     )
+    notifications: Mapped[list["Notification"]] = relationship(  # type: ignore[name-defined]  # noqa: F821
+        back_populates="user", cascade="all, delete-orphan"
+    )
 
 
 class EmailVerification(Base):

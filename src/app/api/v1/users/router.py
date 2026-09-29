@@ -116,6 +116,20 @@ async def create_user(
         await log_action(db, user_id=actor_id, action="create", module="users", entity_id=str(user.id), new_value={"name": user.name, "email": user.email}, request=request)
         await db.commit()
 
+    # Auto-create notification for the admin who created the user
+    with contextlib.suppress(Exception):
+        actor_id = current_user.get("sub")
+        if actor_id:
+            from app.core.notifications import create_notification
+            await create_notification(
+                db,
+                user_id=uuid.UUID(actor_id),
+                title="User baru dibuat",
+                message=f"{user.name} ({user.email}) telah ditambahkan",
+                type="success",
+                link="/users",
+            )
+
     return _user_success(user, "User berhasil dibuat")
 
 
