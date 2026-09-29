@@ -86,6 +86,18 @@ async def login_user(
                 id=uuid.uuid4(), email=email, ip_address=ip_address, success=False
             ))
             await db.commit()
+            # Auto-create lockout notification
+            if user.failed_login_count >= 5:
+                import contextlib
+                with contextlib.suppress(Exception):
+                    from app.core.notifications import create_notification
+                    await create_notification(
+                        db,
+                        user_id=user.id,
+                        title="Akun terkunci",
+                        message="Akun Anda terkunci selama 15 menit karena terlalu banyak percobaan login gagal",
+                        type="warning",
+                    )
         raise exc.auth_invalid_credentials()
 
     # Check email verified

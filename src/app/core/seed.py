@@ -26,6 +26,9 @@ SEED_PERMISSIONS = [
     {"slug": "settings.read", "name": "Read Settings", "module": "settings", "action": "read"},
     {"slug": "settings.manage", "name": "Manage Settings", "module": "settings", "action": "manage"},
     {"slug": "profile.update", "name": "Update Profile", "module": "profile", "action": "update"},
+    # C1: Notifications
+    {"slug": "notifications.read", "name": "Read Notifications", "module": "notifications", "action": "read"},
+    {"slug": "notifications.manage", "name": "Manage Notifications", "module": "notifications", "action": "manage"},
 ]
 
 SEED_ROLES = [

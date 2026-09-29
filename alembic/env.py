@@ -24,6 +24,7 @@ from app.models import (  # noqa: E402, F401
     LoginAttempt,
     Menu,
     MenuRole,
+    Notification,
     PasswordHistory,
     PasswordReset,
     Permission,
