@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db
 from app.api.v1.auth import email as email_service
+from app.api.v1.auth import oauth as oauth_service
 from app.api.v1.auth import service
 from app.core.audit import log_action
 from app.core.redis import redis_client
@@ -254,3 +255,97 @@ async def get_me(
     user_id = uuid.UUID(payload["sub"])
     user = await service.get_user_by_id(db, user_id)
     return SuccessResponse(data=UserResponse.model_validate(user), message="OK")
+
+
+# ---------------------------------------------------------------------------
+# OAuth / SSO endpoints (C2)
+# ---------------------------------------------------------------------------
+
+_SUPPORTED_PROVIDERS = {"google", "microsoft", "tgsso"}
+
+
+@router.get("/oauth/{provider}")
+async def oauth_redirect(
+    provider: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """Redirect browser to the OAuth provider's authorization page."""
+    from fastapi.responses import RedirectResponse
+
+    from app.core.config import settings
+    from app.core.exceptions import AppException
+
+    if provider not in _SUPPORTED_PROVIDERS:
+        raise AppException(
+            "OAUTH_UNSUPPORTED_PROVIDER",
+            f"Provider '{provider}' is not supported. Use: {', '.join(sorted(_SUPPORTED_PROVIDERS))}",
+            400,
+        )
+    if not oauth_service.is_provider_configured(provider, settings):
+        raise AppException(
+            "OAUTH_PROVIDER_NOT_CONFIGURED",
+            f"Provider '{provider}' is not configured. Set the required environment variables.",
+            400,
+        )
+    auth_url = await oauth_service.get_oauth_redirect_url(provider, settings)
+    return RedirectResponse(url=auth_url)
+
+
+@router.get("/oauth/{provider}/callback")
+async def oauth_callback(
+    provider: str,
+    code: str | None = None,
+    state: str | None = None,
+    error: str | None = None,
+    db: AsyncSession = Depends(get_db),
+):
+    """Handle the callback from an OAuth provider."""
+    from fastapi.responses import RedirectResponse
+
+    from app.core.config import settings
+    from app.core.exceptions import AppException
+
+    error_redirect_base = settings.OAUTH_ERROR_REDIRECT
+
+    if provider not in _SUPPORTED_PROVIDERS:
+        return RedirectResponse(url=f"{error_redirect_base}?error=unsupported_provider")
+
+    if error:
+        return RedirectResponse(url=f"{error_redirect_base}?error={error}")
+
+    if not code or not state:
+        return RedirectResponse(url=f"{error_redirect_base}?error=missing_code_or_state")
+
+    try:
+        access_token, raw_refresh = await oauth_service.handle_oauth_callback(
+            provider, code, state, db, settings
+        )
+    except AppException as exc:
+        import urllib.parse
+        err_msg = urllib.parse.quote(exc.message or exc.code)
+        return RedirectResponse(url=f"{error_redirect_base}?error={err_msg}")
+    except Exception:
+        return RedirectResponse(url=f"{error_redirect_base}?error=internal_error")
+
+    success_url = (
+        f"{settings.OAUTH_SUCCESS_REDIRECT}"
+        f"?access_token={access_token}"
+        f"&token_type=bearer"
+    )
+    response = RedirectResponse(url=success_url)
+    response.set_cookie(
+        "refresh_token",
+        raw_refresh,
+        httponly=True,
+        samesite="lax",
+        max_age=7 * 24 * 3600,
+    )
+    csrf_token = str(uuid.uuid4())
+    response.set_cookie(
+        "csrf_token",
+        csrf_token,
+        httponly=False,
+        samesite="lax",
+        max_age=7 * 24 * 3600,
+    )
+    return response

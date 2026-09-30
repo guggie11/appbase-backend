@@ -18,6 +18,10 @@ CSRF_EXEMPT_PATHS = {
     "/openapi.json",
 }
 
+CSRF_EXEMPT_PREFIXES = {
+    "/api/v1/auth/oauth/",
+}
+
 CSRF_PROTECTED_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
 
 
@@ -25,7 +29,10 @@ class CSRFMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next) -> Response:
         if request.method in CSRF_PROTECTED_METHODS:
             path = request.url.path
-            if path not in CSRF_EXEMPT_PATHS:
+            exempt = path in CSRF_EXEMPT_PATHS or any(
+                path.startswith(prefix) for prefix in CSRF_EXEMPT_PREFIXES
+            )
+            if not exempt:
                 csrf_header = request.headers.get("X-CSRF-Token")
                 csrf_cookie = request.cookies.get("csrf_token")
                 if not csrf_header or not csrf_cookie or csrf_header != csrf_cookie:
