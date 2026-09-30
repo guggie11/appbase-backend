@@ -30,6 +30,21 @@ Terima kasih.
     )
 
 
+async def send_invitation_email(to_email: str, token: str) -> None:
+    link = f"{settings.FRONTEND_URL}/accept-invitation?token={token}"
+    body = f"""Admin has invited you. Click link to set your password: {link}"""
+    msg = MIMEText(body, "plain", "utf-8")
+    msg["Subject"] = "You have been invited to Appbase"
+    msg["From"] = "noreply@appbase.local"
+    msg["To"] = to_email
+
+    await aiosmtplib.send(
+        msg,
+        hostname=settings.SMTP_HOST,
+        port=settings.SMTP_PORT,
+    )
+
+
 async def send_reset_email(to_email: str, token: str) -> None:
     link = f"{settings.FRONTEND_URL}/reset-password?token={token}"
     body = f"""

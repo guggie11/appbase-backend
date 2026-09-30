@@ -86,6 +86,18 @@ async def login_user(
                 id=uuid.uuid4(), email=email, ip_address=ip_address, success=False
             ))
             await db.commit()
+            # Auto-create lockout notification
+            if user.failed_login_count >= 5:
+                import contextlib
+                with contextlib.suppress(Exception):
+                    from app.core.notifications import create_notification
+                    await create_notification(
+                        db,
+                        user_id=user.id,
+                        title="Akun terkunci",
+                        message="Akun Anda terkunci selama 15 menit karena terlalu banyak percobaan login gagal",
+                        type="warning",
+                    )
         raise exc.auth_invalid_credentials()
 
     # Check email verified
@@ -327,3 +339,37 @@ async def get_user_by_id(db: AsyncSession, user_id: uuid.UUID) -> User:
     if not user:
         raise exc.auth_user_not_found()
     return user
+
+
+async def accept_invitation(db: AsyncSession, token: str, new_password: str) -> None:
+    token_hash = sha256_hex(token)
+    from app.models.user import UserInvitation
+    result = await db.execute(
+        select(UserInvitation).where(
+            UserInvitation.token_hash == token_hash,
+            UserInvitation.used_at.is_(None),
+        )
+    )
+    invitation = result.scalar_one_or_none()
+
+    if not invitation:
+        raise exc.auth_invalid_invitation_token()
+
+    if invitation.expires_at < _now():
+        raise exc.auth_invitation_expired()
+
+    # Get user
+    user_result = await db.execute(select(User).where(User.id == invitation.user_id))
+    user = user_result.scalar_one_or_none()
+    if not user:
+        raise exc.auth_user_not_found()
+
+    # Update user: set password, activate, verify
+    user.password_hash = hash_password(new_password)
+    user.status = "active"
+    user.is_verified = True
+
+    # Mark invitation as used
+    invitation.used_at = _now()
+
+    await db.commit()

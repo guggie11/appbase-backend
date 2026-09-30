@@ -40,6 +40,12 @@ class User(Base, TimestampMixin):
     user_roles: Mapped[list["UserRole"]] = relationship(  # type: ignore[name-defined]  # noqa: F821
         back_populates="user", cascade="all, delete-orphan"
     )
+    user_invitations: Mapped[list["UserInvitation"]] = relationship(
+        back_populates="user", cascade="all, delete-orphan"
+    )
+    notifications: Mapped[list["Notification"]] = relationship(  # type: ignore[name-defined]  # noqa: F821
+        back_populates="user", cascade="all, delete-orphan"
+    )
 
 
 class EmailVerification(Base):
@@ -104,6 +110,28 @@ class PasswordHistory(Base):
     )
 
     user: Mapped["User"] = relationship(back_populates="password_histories")
+
+
+class UserInvitation(Base):
+    __tablename__ = "user_invitations"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    token_hash: Mapped[str] = mapped_column(String(255), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=False), nullable=False)
+    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=False), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=False),
+        default=lambda: datetime.now(UTC).replace(tzinfo=None),
+        server_default="now()",
+        nullable=False,
+    )
+
+    user: Mapped["User"] = relationship(back_populates="user_invitations")
 
 
 # Avoid circular imports — import here for relationship resolution

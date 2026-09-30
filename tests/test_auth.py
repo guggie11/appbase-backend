@@ -198,3 +198,129 @@ class TestMe:
     async def test_me_unauthenticated(self, async_client):
         resp = await async_client.get("/api/v1/auth/me")
         assert resp.status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# Accept Invitation
+# ---------------------------------------------------------------------------
+class TestAcceptInvitation:
+    async def _create_pending_user_with_invitation(self, test_db):
+        """Helper: create pending user + valid invitation, return (user, raw_token)."""
+        import os
+        import uuid
+        from datetime import UTC, datetime, timedelta
+        from hashlib import sha256
+
+        from app.models.user import User, UserInvitation
+
+        user = User(
+            id=uuid.uuid4(),
+            name="Invited User",
+            email=f"invited-{uuid.uuid4().hex[:8]}@example.com",
+            password_hash=None,
+            status="pending",
+            is_verified=False,
+        )
+        test_db.add(user)
+        await test_db.flush()
+
+        raw_token = os.urandom(32).hex()
+        token_hash = sha256(raw_token.encode()).hexdigest()
+        invitation = UserInvitation(
+            id=uuid.uuid4(),
+            user_id=user.id,
+            token_hash=token_hash,
+            expires_at=datetime.now(UTC).replace(tzinfo=None) + timedelta(days=7),
+        )
+        test_db.add(invitation)
+        await test_db.commit()
+        await test_db.refresh(user)
+        return user, raw_token
+
+    async def test_accept_invitation_success(self, async_client, test_db):
+        user, raw_token = await self._create_pending_user_with_invitation(test_db)
+        resp = await async_client.post(
+            "/api/v1/auth/accept-invitation",
+            json={"token": raw_token, "password": "NewP@ss123!"},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["message"] == "Password berhasil dibuat, silakan login"
+
+        # Verify user is now active + verified
+        from sqlalchemy import select
+        from app.models.user import User
+        result = await test_db.execute(select(User).where(User.id == user.id))
+        updated = result.scalar_one()
+        assert updated.status == "active"
+        assert updated.is_verified is True
+        assert updated.password_hash is not None
+
+    async def test_accept_invitation_invalid_token(self, async_client, test_db):
+        resp = await async_client.post(
+            "/api/v1/auth/accept-invitation",
+            json={"token": "invalidtoken123", "password": "NewP@ss123!"},
+        )
+        assert resp.status_code == 400
+        assert resp.json()["error"]["code"] == "AUTH_INVALID_INVITATION_TOKEN"
+
+    async def test_accept_invitation_expired_token(self, async_client, test_db):
+        import os
+        import uuid
+        from datetime import UTC, datetime, timedelta
+        from hashlib import sha256
+
+        from app.models.user import User, UserInvitation
+
+        user = User(
+            id=uuid.uuid4(),
+            name="Expired User",
+            email=f"expired-{uuid.uuid4().hex[:8]}@example.com",
+            password_hash=None,
+            status="pending",
+            is_verified=False,
+        )
+        test_db.add(user)
+        await test_db.flush()
+
+        raw_token = os.urandom(32).hex()
+        token_hash = sha256(raw_token.encode()).hexdigest()
+        # Expired 1 hour ago
+        invitation = UserInvitation(
+            id=uuid.uuid4(),
+            user_id=user.id,
+            token_hash=token_hash,
+            expires_at=datetime.now(UTC).replace(tzinfo=None) - timedelta(hours=1),
+        )
+        test_db.add(invitation)
+        await test_db.commit()
+
+        resp = await async_client.post(
+            "/api/v1/auth/accept-invitation",
+            json={"token": raw_token, "password": "NewP@ss123!"},
+        )
+        assert resp.status_code == 400
+        assert resp.json()["error"]["code"] == "AUTH_INVITATION_EXPIRED"
+
+    async def test_accept_invitation_used_token(self, async_client, test_db):
+        user, raw_token = await self._create_pending_user_with_invitation(test_db)
+        # First use
+        r1 = await async_client.post(
+            "/api/v1/auth/accept-invitation",
+            json={"token": raw_token, "password": "NewP@ss123!"},
+        )
+        assert r1.status_code == 200
+        # Second use — token already consumed
+        r2 = await async_client.post(
+            "/api/v1/auth/accept-invitation",
+            json={"token": raw_token, "password": "AnotherP@ss456!"},
+        )
+        assert r2.status_code == 400
+        assert r2.json()["error"]["code"] == "AUTH_INVALID_INVITATION_TOKEN"
+
+    async def test_accept_invitation_weak_password(self, async_client, test_db):
+        user, raw_token = await self._create_pending_user_with_invitation(test_db)
+        resp = await async_client.post(
+            "/api/v1/auth/accept-invitation",
+            json={"token": raw_token, "password": "weak"},
+        )
+        assert resp.status_code == 422

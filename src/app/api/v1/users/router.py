@@ -1,14 +1,22 @@
 """Users API router."""
 import contextlib
+import csv
+import io
 import uuid
+from datetime import date
 
 from fastapi import APIRouter, Depends, File, Query, Request, UploadFile
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
+from starlette.responses import StreamingResponse
 
 from app.api.deps import get_db, require_permission
 from app.api.v1.users import service
 from app.core.audit import log_action
 from app.core.exceptions import AppException
+from app.models.rbac import UserRole
+from app.models.user import User
 from app.schemas.common import PaginatedResponse, SuccessResponse
 from app.schemas.user import (
     AssignRolesRequest,
@@ -50,6 +58,46 @@ async def list_users(
     return PaginatedResponse(data=data, total=total, page=page, per_page=per_page)
 
 
+@router.get("/export")
+async def export_users(
+    db: AsyncSession = Depends(get_db),
+    _: dict = Depends(require_permission("users.read")),
+):
+    """Export all active users as a CSV file."""
+    result = await db.execute(
+        select(User)
+        .where(User.deleted_at.is_(None))
+        .options(selectinload(User.user_roles).selectinload(UserRole.role))
+        .order_by(User.created_at.desc())
+    )
+    users = result.scalars().all()
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["id", "name", "email", "status", "roles", "is_verified", "created_at"])
+
+    for user in users:
+        roles = ", ".join([ur.role.name for ur in user.user_roles if ur.role])
+        writer.writerow([
+            str(user.id),
+            user.name,
+            user.email,
+            user.status,
+            roles,
+            user.is_verified,
+            user.created_at.isoformat(),
+        ])
+
+    output.seek(0)
+    filename = f"users_{date.today().isoformat()}.csv"
+
+    return StreamingResponse(
+        iter([output.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
+
+
 @router.post("/", response_model=SuccessResponse[UserWithRolesResponse], status_code=201)
 async def create_user(
     body: CreateUserRequest,
@@ -57,16 +105,30 @@ async def create_user(
     db: AsyncSession = Depends(get_db),
     current_user: dict = Depends(require_permission("users.create")),
 ):
-    user = await service.create_user(db, name=body.name, email=body.email, role_ids=body.role_ids)
+    user, raw_token = await service.create_user(db, name=body.name, email=body.email, role_ids=body.role_ids)
     # Send invitation email (fire and forget)
     with contextlib.suppress(Exception):
-        from app.api.v1.auth.email import send_verification_email
-        await send_verification_email(user.email, "invite")
+        from app.api.v1.auth.email import send_invitation_email
+        await send_invitation_email(user.email, raw_token)
 
     with contextlib.suppress(Exception):
         actor_id = current_user.get("sub")
         await log_action(db, user_id=actor_id, action="create", module="users", entity_id=str(user.id), new_value={"name": user.name, "email": user.email}, request=request)
         await db.commit()
+
+    # Auto-create notification for the admin who created the user
+    with contextlib.suppress(Exception):
+        actor_id = current_user.get("sub")
+        if actor_id:
+            from app.core.notifications import create_notification
+            await create_notification(
+                db,
+                user_id=uuid.UUID(actor_id),
+                title="User baru dibuat",
+                message=f"{user.name} ({user.email}) telah ditambahkan",
+                type="success",
+                link="/users",
+            )
 
     return _user_success(user, "User berhasil dibuat")
 
