@@ -19,6 +19,30 @@ class Settings(BaseSettings):
     FRONTEND_URL: str = "http://localhost:5173"
     ALGORITHM: str = "HS256"
 
+    # OAuth / SSO (C2) — all optional, empty = provider disabled
+    # Google OAuth
+    GOOGLE_CLIENT_ID: str = ""
+    GOOGLE_CLIENT_SECRET: str = ""
+    GOOGLE_REDIRECT_URI: str = "http://localhost:8000/api/v1/auth/oauth/google/callback"
+
+    # Microsoft OAuth
+    MICROSOFT_CLIENT_ID: str = ""
+    MICROSOFT_CLIENT_SECRET: str = ""
+    MICROSOFT_REDIRECT_URI: str = "http://localhost:8000/api/v1/auth/oauth/microsoft/callback"
+    MICROSOFT_TENANT_ID: str = "common"
+
+    # TGSSO (Telkom SSO — standard OIDC)
+    TGSSO_CLIENT_ID: str = ""
+    TGSSO_CLIENT_SECRET: str = ""
+    TGSSO_AUTH_URL: str = ""
+    TGSSO_TOKEN_URL: str = ""
+    TGSSO_USERINFO_URL: str = ""
+    TGSSO_REDIRECT_URI: str = "http://localhost:8000/api/v1/auth/oauth/tgsso/callback"
+
+    # Frontend redirect URLs after OAuth
+    OAUTH_SUCCESS_REDIRECT: str = "http://localhost:5173/oauth/callback"
+    OAUTH_ERROR_REDIRECT: str = "http://localhost:5173/oauth/error"
+
     @property
     def cors_origins_list(self) -> list[str]:
         return [o.strip() for o in self.CORS_ORIGINS.split(",")]
