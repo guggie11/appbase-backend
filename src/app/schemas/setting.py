@@ -18,5 +18,11 @@ class SettingResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class PublicSettingResponse(BaseModel):
+    key: str
+    value: str | None = None
+    type: str
+
+
 class UpdateSettingRequest(BaseModel):
     value: str | None = None

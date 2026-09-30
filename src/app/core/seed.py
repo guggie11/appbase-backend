@@ -42,6 +42,11 @@ SEED_SETTINGS = [
     {"key": "max_login_attempts", "value": "5", "type": "number", "is_public": False, "is_secret": False},
     {"key": "lockout_duration_minutes", "value": "15", "type": "number", "is_public": False, "is_secret": False},
     {"key": "smtp_host", "value": "localhost", "type": "string", "is_public": False, "is_secret": True},
+    # Phase 5: App Appearance Settings
+    {"key": "app_subtitle", "value": "App Template", "type": "string", "is_public": True, "is_secret": False},
+    {"key": "primary_color", "value": "#D94F3D", "type": "string", "is_public": True, "is_secret": False},
+    {"key": "logo_url", "value": "", "type": "string", "is_public": True, "is_secret": False},
+    {"key": "favicon_url", "value": "", "type": "string", "is_public": True, "is_secret": False},
 ]
 
 
