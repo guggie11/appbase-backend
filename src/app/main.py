@@ -50,8 +50,9 @@ app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 app.add_exception_handler(AppException, app_exception_handler)  # type: ignore[arg-type]
 
-# Static files for avatars
+# Static files for avatars and logos/favicons
 pathlib.Path("static/avatars").mkdir(parents=True, exist_ok=True)
+pathlib.Path("static/logos").mkdir(parents=True, exist_ok=True)
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
 # Middlewares (order matters — outermost = last added)
