@@ -134,9 +134,10 @@ async def create_menu(
             db.add(menu_role)
 
     await db.commit()
-    await db.refresh(menu)
     await _invalidate_menu_cache()
-    return menu
+    # Re-query eagerly: db.refresh() does not reload selectinload relations,
+    # so serialising the stale instance triggers lazy IO (MissingGreenlet).
+    return await _get_menu_or_404(db, menu.id)
 
 
 async def update_menu(
