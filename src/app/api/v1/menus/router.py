@@ -27,7 +27,7 @@ def menu_to_response(menu) -> MenuResponse:
         for mr in menu.menu_roles:
             if hasattr(mr, "role") and mr.role:
                 roles.append(RoleInMenu.model_validate(mr.role))
-    data = menu_to_response(menu)
+    data = MenuResponse.model_validate(menu)
     data.roles = roles
     return data
 
