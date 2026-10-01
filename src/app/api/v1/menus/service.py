@@ -17,7 +17,7 @@ from app.models.rbac import Role
 async def _get_menu_or_404(db: AsyncSession, menu_id: uuid.UUID) -> Menu:
     result = await db.execute(
         select(Menu)
-        .options(selectinload(Menu.menu_roles))
+        .options(selectinload(Menu.menu_roles).selectinload(MenuRole.role))
         .where(Menu.id == menu_id)
     )
     menu = result.scalar_one_or_none()
@@ -192,30 +192,96 @@ async def update_menu(
             db.add(MenuRole(menu_id=menu_id, role_id=role_id))
 
     await db.commit()
-    await db.refresh(menu)
     await _invalidate_menu_cache()
-    return menu
+    return await _get_menu_or_404(db, menu_id)
 
 
 async def update_menu_order(db: AsyncSession, menu_id: uuid.UUID, order_index: int) -> Menu:
     menu = await _get_menu_or_404(db, menu_id)
     menu.order_index = order_index
     await db.commit()
-    await db.refresh(menu)
     await _invalidate_menu_cache()
-    return menu
+    # Re-query: db.refresh() does not reload selectinload relations, so serialising
+    # the stale instance triggers lazy IO (MissingGreenlet) outside the greenlet.
+    return await _get_menu_or_404(db, menu_id)
+
+
+async def reorder_siblings(
+    db: AsyncSession,
+    parent_id: uuid.UUID | None,
+    menu_ids: list[uuid.UUID],
+) -> list[Menu]:
+    """Atomically renumber one sibling group to order_index 0..n-1.
+
+    ``menu_ids`` must be the COMPLETE ordered sibling set for ``parent_id``.
+    Validation happens before any write, so a rejected payload leaves the
+    stored ordering untouched.
+    """
+    if not menu_ids:
+        raise AppException(
+            code="MENUS_REORDER_EMPTY",
+            message="Daftar menu tidak boleh kosong",
+            status_code=422,
+        )
+
+    if len(set(menu_ids)) != len(menu_ids):
+        raise AppException(
+            code="MENUS_REORDER_DUPLICATE",
+            message="Daftar menu mengandung ID duplikat",
+            status_code=422,
+        )
+
+    if parent_id is not None:
+        parent_exists = await db.execute(select(Menu.id).where(Menu.id == parent_id))
+        if parent_exists.scalar_one_or_none() is None:
+            raise AppException(
+                code="MENUS_NOT_FOUND",
+                message="Parent menu tidak ditemukan",
+                status_code=404,
+            )
+
+    # Lock the whole sibling group so concurrent reorders serialise.
+    sibling_query = select(Menu).where(
+        Menu.parent_id.is_(None) if parent_id is None else Menu.parent_id == parent_id
+    )
+    with contextlib.suppress(NotImplementedError):
+        sibling_query = sibling_query.with_for_update()
+    sibling_result = await db.execute(sibling_query)
+    siblings = {m.id: m for m in sibling_result.scalars().all()}
+
+    unknown = [mid for mid in menu_ids if mid not in siblings]
+    if unknown:
+        raise AppException(
+            code="MENUS_REORDER_INVALID_MEMBER",
+            message="Menu tidak ditemukan pada grup parent yang dimaksud",
+            status_code=422,
+        )
+
+    missing = [mid for mid in siblings if mid not in menu_ids]
+    if missing:
+        raise AppException(
+            code="MENUS_REORDER_INCOMPLETE",
+            message="Daftar menu harus memuat seluruh sibling pada grup ini",
+            status_code=422,
+        )
+
+    for position, menu_id in enumerate(menu_ids):
+        siblings[menu_id].order_index = position
+
+    await db.commit()
+    await _invalidate_menu_cache()
+    return await list_menus(db)
 
 
 async def assign_menu_roles(db: AsyncSession, menu_id: uuid.UUID, role_ids: list[uuid.UUID]) -> Menu:
-    menu = await _get_menu_or_404(db, menu_id)
+    await _get_menu_or_404(db, menu_id)
     from sqlalchemy import delete
     await db.execute(delete(MenuRole).where(MenuRole.menu_id == menu_id))
     for role_id in role_ids:
         db.add(MenuRole(menu_id=menu_id, role_id=role_id))
     await db.commit()
-    await db.refresh(menu)
     await _invalidate_menu_cache()
-    return menu
+    return await _get_menu_or_404(db, menu_id)
 
 
 async def _delete_menu_recursive(db: AsyncSession, menu_id: uuid.UUID) -> None:
