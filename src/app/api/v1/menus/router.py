@@ -14,6 +14,7 @@ from app.schemas.menu import (
     AssignMenuRolesRequest,
     CreateMenuRequest,
     MenuResponse,
+    ReorderMenusRequest,
     RoleInMenu,
     UpdateMenuOrderRequest,
     UpdateMenuRequest,
@@ -106,6 +107,33 @@ async def create_menu(
         await log_action(db, user_id=current_user.get("sub"), action="create", module="menus", entity_id=str(menu.id), new_value={"label": menu.label}, request=request)
         await db.commit()
     return {"data": menu_to_response(menu), "message": "Menu berhasil dibuat"}
+
+
+@router.put("/reorder", summary="Atomically reorder one sibling group")
+async def reorder_menus(
+    body: ReorderMenusRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(require_permission("menu.manage")),
+):
+    menus = await service.reorder_siblings(
+        db, parent_id=body.parent_id, menu_ids=body.menu_ids
+    )
+    with contextlib.suppress(Exception):
+        await log_action(
+            db,
+            user_id=current_user.get("sub"),
+            action="reorder",
+            module="menus",
+            entity_id=str(body.parent_id) if body.parent_id else None,
+            new_value={"menu_ids": [str(m) for m in body.menu_ids]},
+            request=request,
+        )
+        await db.commit()
+    return {
+        "data": [menu_to_response(m) for m in menus],
+        "message": "Urutan menu berhasil diperbarui",
+    }
 
 
 @router.put("/{menu_id}", summary="Update menu")

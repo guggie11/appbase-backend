@@ -65,5 +65,12 @@ class UpdateMenuOrderRequest(BaseModel):
     order_index: int
 
 
+class ReorderMenusRequest(BaseModel):
+    """Complete ordered sibling set for one parent group."""
+
+    parent_id: uuid.UUID | None = None
+    menu_ids: list[uuid.UUID]
+
+
 class AssignMenuRolesRequest(BaseModel):
     role_ids: list[uuid.UUID]
