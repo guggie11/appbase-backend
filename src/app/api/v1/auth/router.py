@@ -22,6 +22,7 @@ from app.schemas.auth import (
     RegisterRequest,
     ResendVerificationRequest,
     ResetPasswordRequest,
+    RoleBrief,
     TokenResponse,
     UserBriefResponse,
     UserResponse,
@@ -254,7 +255,16 @@ async def get_me(
 ):
     user_id = uuid.UUID(payload["sub"])
     user = await service.get_user_by_id(db, user_id)
-    return SuccessResponse(data=UserResponse.model_validate(user), message="OK")
+
+    data = UserResponse.model_validate(user)
+    # Relations are eager-loaded by get_user_by_id, so this touches no DB.
+    data.roles = [
+        RoleBrief(id=ur.role.id, name=ur.role.name, slug=ur.role.slug)
+        for ur in (user.user_roles or [])
+        if ur.role is not None
+    ]
+    data.permissions = service.collect_permissions(user)
+    return SuccessResponse(data=data, message="OK")
 
 
 # ---------------------------------------------------------------------------
