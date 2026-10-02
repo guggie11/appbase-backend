@@ -14,6 +14,10 @@ class RoleResponse(BaseModel):
     description: str | None = None
     is_system: bool
     is_active: bool
+    # platform / built-in / custom — drives the badge and the edit lock.
+    kind: str = "custom"
+    # How many users hold this role; shown next to the badge.
+    user_count: int = 0
     created_at: datetime
     updated_at: datetime
 

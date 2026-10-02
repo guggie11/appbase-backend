@@ -78,6 +78,21 @@ async def update_role(
     return SuccessResponse(data=RoleResponse.model_validate(role), message="Role berhasil diperbarui")
 
 
+@router.post("/{role_id}/duplicate", response_model=SuccessResponse[RoleResponse])
+async def duplicate_role(
+    role_id: uuid.UUID,
+    body: CreateRoleRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(require_permission("roles.create")),
+):
+    role = await service.duplicate_role(db, role_id, name=body.name)
+    with contextlib.suppress(Exception):
+        await log_action(db, user_id=current_user.get("sub"), action="create", module="roles", entity_id=str(role.id), new_value={"name": role.name, "duplicated_from": str(role_id)}, request=request)
+        await db.commit()
+    return SuccessResponse(data=RoleResponse.model_validate(role), message="Role berhasil diduplikasi")
+
+
 @router.delete("/{role_id}", response_model=SuccessResponse[None])
 async def delete_role(
     role_id: uuid.UUID,
