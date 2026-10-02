@@ -180,15 +180,22 @@ def create_role(test_db: AsyncSession):
         name: str = "",
         permissions: list[str] | None = None,
     ):
-        role = Role(
-            id=uuid.uuid4(),
-            name=name or slug,
-            slug=slug,
-            is_system=False,
-            is_active=True,
-        )
-        test_db.add(role)
-        await test_db.flush()
+        from sqlalchemy import select
+
+        # Reuse an existing role: the seed now creates super-admin and user,
+        # so a blind insert collides on roles.slug.
+        existing = await test_db.execute(select(Role).where(Role.slug == slug))
+        role = existing.scalar_one_or_none()
+        if role is None:
+            role = Role(
+                id=uuid.uuid4(),
+                name=name or slug,
+                slug=slug,
+                is_system=False,
+                is_active=True,
+            )
+            test_db.add(role)
+            await test_db.flush()
 
         for perm_slug in permissions or []:
             # upsert permission

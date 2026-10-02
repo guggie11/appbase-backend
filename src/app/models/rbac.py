@@ -18,6 +18,11 @@ class Permission(Base):
     slug: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
     module: Mapped[str] = mapped_column(String(100), nullable=False)
     action: Mapped[str] = mapped_column(String(50), nullable=False)
+    # A bare slug ("menu.manage") tells an admin nothing; these three columns
+    # are what turn the permission matrix into something readable.
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    group: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    is_dangerous: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=False),
         default=lambda: datetime.now(UTC).replace(tzinfo=None),
@@ -39,6 +44,10 @@ class Role(Base, TimestampMixin):
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     is_system: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    # platform  = immutable, owns the system (editing it can lock everyone out)
+    # built-in  = shipped by the template, editable
+    # custom    = created by an admin
+    kind: Mapped[str] = mapped_column(String(20), default="custom", nullable=False)
 
     role_permissions: Mapped[list["RolePermission"]] = relationship(back_populates="role")
     user_roles: Mapped[list["UserRole"]] = relationship(back_populates="role")
