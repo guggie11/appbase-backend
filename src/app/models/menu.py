@@ -21,6 +21,10 @@ class Menu(Base, TimestampMixin):
     )
     order_index: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    # Permission slug required to see this item, e.g. "users.read".
+    # NULL means the item is public. Binding to a permission rather than to a
+    # role means new roles inherit visibility automatically.
+    required_permission: Mapped[str | None] = mapped_column(String(100), nullable=True)
 
     children: Mapped[list["Menu"]] = relationship(back_populates="parent")
     parent: Mapped["Menu | None"] = relationship(back_populates="children", remote_side=[id])

@@ -23,6 +23,8 @@ class MenuResponse(BaseModel):
     parent_id: uuid.UUID | None = None
     order_index: int
     is_active: bool
+    # Permission slug required to see this item; NULL keeps it public.
+    required_permission: str | None = None
     roles: list[RoleInMenu] = []
     created_at: datetime
     updated_at: datetime
@@ -48,6 +50,8 @@ class CreateMenuRequest(BaseModel):
     parent_id: uuid.UUID | None = None
     order_index: int = 0
     is_active: bool = True
+    # Permission slug required to see this item; NULL keeps it public.
+    required_permission: str | None = None
     role_ids: list[uuid.UUID] = []
 
 
@@ -58,6 +62,8 @@ class UpdateMenuRequest(BaseModel):
     parent_id: uuid.UUID | None = None
     order_index: int | None = None
     is_active: bool | None = None
+    # Permission slug required to see this item; NULL keeps it public.
+    required_permission: str | None = None
     role_ids: list[uuid.UUID] | None = None
 
 

@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import get_current_user, get_db, require_permission
 from app.api.v1.menus import service
 from app.core.audit import log_action
+from app.core.exceptions import AppException
 from app.schemas.menu import (
     AssignMenuRolesRequest,
     CreateMenuRequest,
@@ -50,6 +51,7 @@ async def list_menus(
 
 @router.get("/my-menu", summary="Get menu tree for current user (S-056)")
 async def get_my_menu(
+    preview_role: str | None = None,
     current_user: dict = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -67,13 +69,48 @@ async def get_my_menu(
     role_slugs = [row[0] for row in role_result.fetchall()]
     is_super_admin = "super-admin" in role_slugs
 
+    if preview_role:
+        # "What does a holder of this role actually see?" — answered without
+        # logging out. Only an admin who may read roles can ask.
+        if not is_super_admin and "roles.read" not in await _permission_slugs(
+            db, role_slugs
+        ):
+            raise AppException(
+                code="MENUS_PREVIEW_FORBIDDEN",
+                message="Tidak boleh melakukan preview sebagai role lain",
+                status_code=403,
+            )
+        role_slugs = [preview_role]
+        is_super_admin = preview_role == "super-admin"
+
+    permissions = await _permission_slugs(db, role_slugs)
+
     tree = await service.get_my_menu(
         db=db,
         user_id=user_id,
         user_roles=role_slugs,
         is_super_admin=is_super_admin,
+        permissions=permissions,
     )
     return {"data": tree, "message": "Berhasil"}
+
+
+async def _permission_slugs(db: AsyncSession, role_slugs: list[str]) -> list[str]:
+    """Flat permission slugs granted by the given roles."""
+    from sqlalchemy import select
+
+    from app.models.rbac import Permission, Role, RolePermission
+
+    if not role_slugs:
+        return []
+    rows = await db.execute(
+        select(Permission.slug)
+        .join(RolePermission, RolePermission.permission_id == Permission.id)
+        .join(Role, Role.id == RolePermission.role_id)
+        .where(Role.slug.in_(role_slugs))
+        .where(Role.is_active.is_(True))
+    )
+    return sorted({row[0] for row in rows.fetchall()})
 
 
 @router.get("/{menu_id}", summary="Get menu detail")
@@ -102,6 +139,7 @@ async def create_menu(
         order_index=body.order_index,
         is_active=body.is_active,
         role_ids=body.role_ids,
+        required_permission=body.required_permission,
     )
     with contextlib.suppress(Exception):
         await log_action(db, user_id=current_user.get("sub"), action="create", module="menus", entity_id=str(menu.id), new_value={"label": menu.label}, request=request)
@@ -154,6 +192,7 @@ async def update_menu(
         order_index=body.order_index,
         is_active=body.is_active,
         role_ids=body.role_ids,
+        required_permission=body.required_permission,
     )
     with contextlib.suppress(Exception):
         await log_action(db, user_id=current_user.get("sub"), action="update", module="menus", entity_id=str(menu_id), new_value={"label": body.label}, request=request)
