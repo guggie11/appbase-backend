@@ -12,7 +12,7 @@ from sqlalchemy.orm import selectinload
 from starlette.responses import StreamingResponse
 
 from app.api.deps import get_db, require_permission
-from app.api.v1.users import service
+from app.api.v1.users import bulk, service
 from app.core.audit import log_action
 from app.core.exceptions import AppException
 from app.models.rbac import UserRole
@@ -20,6 +20,8 @@ from app.models.user import User
 from app.schemas.common import PaginatedResponse, SuccessResponse
 from app.schemas.user import (
     AssignRolesRequest,
+    BulkRolesRequest,
+    BulkStatusRequest,
     CreateUserRequest,
     UpdateUserRequest,
     UpdateUserStatusRequest,
@@ -131,6 +133,67 @@ async def create_user(
             )
 
     return _user_success(user, "User berhasil dibuat")
+
+
+@router.post("/bulk/roles", response_model=SuccessResponse[dict])
+async def bulk_roles(
+    body: BulkRolesRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(require_permission("users.assign_role")),
+):
+    result = await bulk.bulk_assign_roles(
+        db,
+        caller_id=uuid.UUID(current_user.get("sub")),
+        user_ids=body.user_ids,
+        role_ids=body.role_ids,
+        action=body.action,
+    )
+    with contextlib.suppress(Exception):
+        await log_action(db, user_id=current_user.get("sub"), action="update", module="users", new_value={"bulk": "roles", "action": body.action, "count": result["updated"]}, request=request)
+        await db.commit()
+    return SuccessResponse(data=result, message="Role massal berhasil diperbarui")
+
+
+@router.post("/bulk/status", response_model=SuccessResponse[dict])
+async def bulk_status(
+    body: BulkStatusRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(require_permission("users.update")),
+):
+    result = await bulk.bulk_update_status(
+        db,
+        caller_id=uuid.UUID(current_user.get("sub")),
+        user_ids=body.user_ids,
+        status=body.status,
+    )
+    with contextlib.suppress(Exception):
+        await log_action(db, user_id=current_user.get("sub"), action="update", module="users", new_value={"bulk": "status", "status": body.status, "count": result["updated"]}, request=request)
+        await db.commit()
+    return SuccessResponse(data=result, message="Status massal berhasil diperbarui")
+
+
+@router.post("/import", response_model=SuccessResponse[dict])
+async def import_users(
+    request: Request,
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(require_permission("users.create")),
+):
+    raw = await file.read()
+    if len(raw) > 2 * 1024 * 1024:
+        raise AppException(
+            code="VALIDATION_ERROR",
+            message="Ukuran file terlalu besar. Maksimal 2MB.",
+            status_code=400,
+        )
+
+    result = await service.import_users(db, raw)
+    with contextlib.suppress(Exception):
+        await log_action(db, user_id=current_user.get("sub"), action="create", module="users", new_value={"import": True, "created": result["created"], "failed": result["failed"]}, request=request)
+        await db.commit()
+    return SuccessResponse(data=result, message="Impor selesai")
 
 
 @router.put("/{user_id}", response_model=SuccessResponse[UserWithRolesResponse])

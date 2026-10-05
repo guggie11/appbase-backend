@@ -39,3 +39,15 @@ class UpdateUserStatusRequest(BaseModel):
 
 class AssignRolesRequest(BaseModel):
     role_ids: list[uuid.UUID]
+
+
+class BulkRolesRequest(BaseModel):
+    user_ids: list[uuid.UUID]
+    role_ids: list[uuid.UUID]
+    # "add" or "remove"
+    action: str
+
+
+class BulkStatusRequest(BaseModel):
+    user_ids: list[uuid.UUID]
+    status: str
