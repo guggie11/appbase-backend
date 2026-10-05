@@ -5,8 +5,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_db, require_permission
 from app.models.rbac import Permission
-from app.schemas.permission import PermissionResponse
 from app.schemas.common import SuccessResponse
+from app.schemas.permission import PermissionResponse
 
 router = APIRouter(prefix="/permissions", tags=["permissions"])
 
