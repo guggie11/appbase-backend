@@ -27,6 +27,31 @@ async def test_every_seed_permission_has_a_description(test_db):
 
 
 @pytest.mark.asyncio
+async def test_reseeding_updates_a_renamed_label(test_db):
+    """Backfill must cover the label, not only the new columns.
+
+    Renaming "Read Users" to "View users" in SEED_PERMISSIONS never reached
+    staging, because the update branch refreshed description/group but left
+    `name` untouched — so the old CRUD wording stayed on screen.
+    """
+    await seed_permissions(test_db)
+
+    row = (
+        await test_db.execute(select(Permission).where(Permission.slug == "users.read"))
+    ).scalar_one()
+    row.name = "Stale Label"
+    await test_db.commit()
+
+    await seed_permissions(test_db)
+
+    refreshed = (
+        await test_db.execute(select(Permission).where(Permission.slug == "users.read"))
+    ).scalar_one()
+    await test_db.refresh(refreshed)
+    assert refreshed.name != "Stale Label", "reseeding did not refresh the label"
+
+
+@pytest.mark.asyncio
 async def test_every_seed_permission_has_a_group(test_db):
     """Grouping is what turns 20 flat rows into a readable matrix."""
     await seed_permissions(test_db)

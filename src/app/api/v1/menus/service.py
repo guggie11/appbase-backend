@@ -100,6 +100,7 @@ async def create_menu(
     order_index: int,
     is_active: bool,
     role_ids: list[uuid.UUID],
+    required_permission: str | None = None,
 ) -> Menu:
     # Validate parent depth
     if parent_id is not None:
@@ -123,6 +124,7 @@ async def create_menu(
         parent_id=parent_id,
         order_index=order_index,
         is_active=is_active,
+        required_permission=required_permission,
     )
     db.add(menu)
     await db.flush()
@@ -150,6 +152,9 @@ async def update_menu(
     order_index: int | None,
     is_active: bool | None,
     role_ids: list[uuid.UUID] | None,
+    # Sentinel: None means "leave alone", while an explicit empty string
+    # clears the requirement and makes the menu public again.
+    required_permission: str | None = None,
 ) -> Menu:
     menu = await _get_menu_or_404(db, menu_id)
 
@@ -183,6 +188,8 @@ async def update_menu(
         menu.order_index = order_index
     if is_active is not None:
         menu.is_active = is_active
+    if required_permission is not None:
+        menu.required_permission = required_permission or None
 
     if role_ids is not None:
         # Replace menu_roles
@@ -304,16 +311,66 @@ async def delete_menu(db: AsyncSession, menu_id: uuid.UUID) -> None:
     await _invalidate_menu_cache()
 
 
+def _visible_menus(
+    all_menus: list[Menu],
+    permissions: set[str],
+    menu_ids_with_role: set,
+) -> list[Menu]:
+    """Keep the items this user may see, plus the parents that hold them.
+
+    An item qualifies when it demands nothing, when the user holds its
+    required permission, or when it is bound to one of the user's roles
+    (the pre-v1.2c mechanism, kept so existing deployments keep working).
+
+    Parents are then pulled back in: dropping a parent whose own permission
+    fails would orphan its visible children and erase them from the tree.
+    """
+    by_id = {m.id: m for m in all_menus}
+
+    def qualifies(m: Menu) -> bool:
+        if m.required_permission:
+            return m.required_permission in permissions
+        if m.menu_roles:
+            return m.id in menu_ids_with_role
+        return True
+
+    keep = {m.id for m in all_menus if qualifies(m)}
+
+    # Walk up from every kept item so no visible child is left without a
+    # branch to hang on. An empty branch is never rescued.
+    for menu_id in list(keep):
+        parent_id = by_id[menu_id].parent_id
+        while parent_id is not None and parent_id not in keep:
+            keep.add(parent_id)
+            parent = by_id.get(parent_id)
+            if parent is None:
+                break
+            parent_id = parent.parent_id
+
+    return [m for m in all_menus if m.id in keep]
+
+
 async def get_my_menu(
     db: AsyncSession,
     user_id: str,
     user_roles: list[str],
     is_super_admin: bool,
+    permissions: list[str] | None = None,
 ) -> list[dict]:
     """Build the menu tree for a specific user, with Redis caching."""
+    import hashlib
     import json
 
-    cache_key = f"menu_user:{user_id}"
+    held = set(permissions or [])
+
+    # The key must cover the rights, not just the identity: the same user can
+    # be previewed as another role, and stale entries would leak one set of
+    # menus into another.
+    fingerprint = hashlib.sha1(
+        "|".join(sorted(held) + ["::"] + sorted(user_roles) + [str(is_super_admin)]).encode()
+    ).hexdigest()[:16]
+    cache_key = f"menu_user:{user_id}:{fingerprint}"
+
     with contextlib.suppress(Exception):
         cached = await redis_client.get(cache_key)
         if cached:
@@ -329,20 +386,16 @@ async def get_my_menu(
         )
         menus = list(result.scalars().all())
     else:
-        # Get roles for this user (role IDs)
         role_result = await db.execute(
             select(Role.id).where(Role.slug.in_(user_roles))
         )
         role_ids = [row[0] for row in role_result.fetchall()]
 
-        # Menus visible: menus with no role restriction OR menus with matching roles
-        # Get menu IDs that have at least one matching role
         menu_with_role_result = await db.execute(
             select(MenuRole.menu_id).where(MenuRole.role_id.in_(role_ids))
         )
         menu_ids_with_role = {row[0] for row in menu_with_role_result.fetchall()}
 
-        # Get all menus with role info
         all_menus_result = await db.execute(
             select(Menu)
             .options(selectinload(Menu.menu_roles))
@@ -351,11 +404,7 @@ async def get_my_menu(
         )
         all_menus = list(all_menus_result.scalars().all())
 
-        # Filter: public (no roles) OR user has matching role
-        menus = [
-            m for m in all_menus
-            if (not m.menu_roles) or (m.id in menu_ids_with_role)
-        ]
+        menus = _visible_menus(all_menus, held, menu_ids_with_role)
 
     # Build tree
     tree = _build_tree(menus)

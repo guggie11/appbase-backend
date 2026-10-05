@@ -98,6 +98,9 @@ async def seed_permissions(db: AsyncSession) -> None:
         result = await db.execute(select(Permission).where(Permission.slug == pdata["slug"]))
         existing = result.scalar_one_or_none()
         if existing:
+            # Keep the label in sync too: renaming a permission in SEED_PERMISSIONS
+            # otherwise never reaches a deployment that already has the row.
+            existing.name = pdata["name"]
             existing.description = pdata.get("description")
             existing.group = pdata.get("group")
             existing.is_dangerous = pdata.get("is_dangerous", False)
