@@ -41,13 +41,21 @@ async def create_superadmin(
     email: str,
     password: str,
     name: str = "Super Admin",
+    seed_if_missing: bool = False,
 ) -> User:
     """Create (or reuse) the first super administrator.
 
+    Args:
+        seed_if_missing: seed roles and permissions when they are absent.
+            The documented setup order starts the app before the tables
+            exist, so startup seeding fails against an empty database and is
+            never retried — leaving nothing to grant.
+
     Raises:
         ValueError: the password is too weak for the most privileged account.
-        RuntimeError: roles have not been seeded, so the account could not be
-            granted anything — creating it anyway would look like success.
+        RuntimeError: roles are absent and seeding was not requested, so the
+            account could not be granted anything — creating it anyway would
+            look like success.
     """
     if len(password) < MIN_PASSWORD_LENGTH:
         raise ValueError(
@@ -58,10 +66,27 @@ async def create_superadmin(
     role = (
         await db.execute(select(Role).where(Role.slug == SUPER_ADMIN_SLUG))
     ).scalar_one_or_none()
+
+    if role is None and seed_if_missing:
+        from app.core.seed import (
+            seed_permissions,
+            seed_role_permissions,
+            seed_roles,
+            seed_settings,
+        )
+
+        await seed_permissions(db)
+        await seed_roles(db)
+        await seed_role_permissions(db)
+        await seed_settings(db)
+        role = (
+            await db.execute(select(Role).where(Role.slug == SUPER_ADMIN_SLUG))
+        ).scalar_one_or_none()
+
     if role is None:
         raise RuntimeError(
-            f"role '{SUPER_ADMIN_SLUG}' not found — start the app once so it "
-            "seeds roles, or run the migrations first"
+            f"role '{SUPER_ADMIN_SLUG}' not found — run the migrations first, "
+            "or pass --seed to create roles and permissions now"
         )
 
     existing = (
@@ -107,6 +132,11 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--name", default=os.getenv("SUPERADMIN_NAME", "Super Admin")
     )
+    parser.add_argument(
+        "--seed",
+        action="store_true",
+        help="seed roles and permissions first if the database has none",
+    )
     return parser.parse_args(argv)
 
 
@@ -127,7 +157,10 @@ async def _main(argv: list[str] | None = None) -> int:
 
     async with AsyncSessionLocal() as db:
         try:
-            user = await create_superadmin(db, args.email, args.password, args.name)
+            user = await create_superadmin(
+                db, args.email, args.password, args.name,
+                seed_if_missing=args.seed,
+            )
         except (ValueError, RuntimeError) as exc:
             print(f"error: {exc}", file=sys.stderr)
             return 1
