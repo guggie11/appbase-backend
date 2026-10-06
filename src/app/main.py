@@ -1,3 +1,4 @@
+import logging
 import pathlib
 from contextlib import asynccontextmanager
 
@@ -37,9 +38,15 @@ async def lifespan(app: FastAPI):
             # Must run after both: this is what actually grants rights.
             await seed_role_permissions(db)
             await seed_settings(db)
-    except Exception:
-        # Don't fail startup if DB is unavailable (e.g., tests)
-        pass
+    except Exception as exc:
+        # Startup must still succeed without a database (tests, or a first
+        # boot before the DB is healthy). But swallowing this silently gave a
+        # running app with no roles and no explanation anywhere.
+        logging.getLogger(__name__).warning(
+            "seeding skipped: %s — the app will start, but roles, permissions "
+            "and settings may be missing until the database is reachable",
+            exc,
+        )
     yield
     # shutdown
 
