@@ -47,6 +47,24 @@ async def get_current_user(
 
 
 # S-050: Permission guard
+#: Write actions that the module-wide ".manage" permission also covers.
+_MANAGE_COVERS = ("create", "update", "delete")
+
+
+def _accepted_slugs(permission_slug: str) -> list[str]:
+    """Slugs that satisfy a required permission.
+
+    `menu.create` is satisfied by `menu.create` or by the older `menu.manage`.
+    Read and approve are deliberately excluded: `.manage` meant "may change
+    things", never "may see things" or "may sign off".
+    """
+    accepted = [permission_slug]
+    module, _, action = permission_slug.partition(".")
+    if action in _MANAGE_COVERS:
+        accepted.append(f"{module}.manage")
+    return accepted
+
+
 def require_permission(permission_slug: str):
     """Return a FastAPI dependency that checks if current user has a given permission."""
 
@@ -80,16 +98,24 @@ def require_permission(permission_slug: str):
             if role.slug == "super-admin":
                 return current_user
 
-        # Check permission via role_permissions
+        # Check permission via role_permissions.
+        #
+        # A write action is satisfied either by its own slug (menu.create) or
+        # by the module's legacy catch-all (menu.manage). Without the second
+        # route, splitting .manage would revoke access from everyone already
+        # holding it; without the first, the new per-action permissions would
+        # be decorative.
+        accepted = _accepted_slugs(permission_slug)
+
         perm_result = await db.execute(
             select(Permission)
             .join(RolePermission, RolePermission.permission_id == Permission.id)
             .join(Role, Role.id == RolePermission.role_id)
             .join(UserRole, UserRole.role_id == Role.id)
             .where(UserRole.user_id == user_id)
-            .where(Permission.slug == permission_slug)
+            .where(Permission.slug.in_(accepted))
         )
-        perm = perm_result.scalar_one_or_none()
+        perm = perm_result.scalars().first()
 
         if not perm:
             raise AppException(code="FORBIDDEN", message="Akses ditolak", status_code=403)

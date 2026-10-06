@@ -1,5 +1,4 @@
 """S-076 — Unit tests for permission guard (require_permission + blacklist)."""
-import pytest
 
 
 class TestPermissions:

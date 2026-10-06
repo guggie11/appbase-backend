@@ -128,7 +128,7 @@ async def create_menu(
     body: CreateMenuRequest,
     request: Request,
     db: AsyncSession = Depends(get_db),
-    current_user: dict = Depends(require_permission("menu.manage")),
+    current_user: dict = Depends(require_permission("menu.create")),
 ):
     menu = await service.create_menu(
         db=db,
@@ -152,7 +152,7 @@ async def reorder_menus(
     body: ReorderMenusRequest,
     request: Request,
     db: AsyncSession = Depends(get_db),
-    current_user: dict = Depends(require_permission("menu.manage")),
+    current_user: dict = Depends(require_permission("menu.update")),
 ):
     menus = await service.reorder_siblings(
         db, parent_id=body.parent_id, menu_ids=body.menu_ids
@@ -180,7 +180,7 @@ async def update_menu(
     body: UpdateMenuRequest,
     request: Request,
     db: AsyncSession = Depends(get_db),
-    current_user: dict = Depends(require_permission("menu.manage")),
+    current_user: dict = Depends(require_permission("menu.update")),
 ):
     menu = await service.update_menu(
         db=db,
@@ -205,7 +205,7 @@ async def delete_menu(
     menu_id: uuid.UUID,
     request: Request,
     db: AsyncSession = Depends(get_db),
-    current_user: dict = Depends(require_permission("menu.manage")),
+    current_user: dict = Depends(require_permission("menu.delete")),
 ):
     await service.delete_menu(db, menu_id)
     with contextlib.suppress(Exception):
@@ -219,7 +219,7 @@ async def update_menu_order(
     menu_id: uuid.UUID,
     body: UpdateMenuOrderRequest,
     db: AsyncSession = Depends(get_db),
-    _: dict = Depends(require_permission("menu.manage")),
+    _: dict = Depends(require_permission("menu.update")),
 ):
     menu = await service.update_menu_order(db, menu_id, body.order_index)
     return {"data": menu_to_response(menu), "message": "Urutan menu berhasil diperbarui"}
@@ -230,7 +230,7 @@ async def assign_menu_roles(
     menu_id: uuid.UUID,
     body: AssignMenuRolesRequest,
     db: AsyncSession = Depends(get_db),
-    _: dict = Depends(require_permission("menu.manage")),
+    _: dict = Depends(require_permission("menu.update")),
 ):
     menu = await service.assign_menu_roles(db, menu_id, body.role_ids)
     return {"data": menu_to_response(menu), "message": "Role menu berhasil diperbarui"}
