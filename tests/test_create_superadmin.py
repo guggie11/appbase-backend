@@ -9,7 +9,7 @@ from scripts.create_superadmin import create_superadmin
 from sqlalchemy import delete, select
 
 from app.core.seed import seed_permissions, seed_roles
-from app.models.rbac import Role, UserRole
+from app.models.rbac import Role, RolePermission, UserRole
 from app.models.user import User
 
 
@@ -95,6 +95,45 @@ async def test_running_it_twice_does_not_fail_or_duplicate(test_db):
 
 
 @pytest.mark.asyncio
+async def test_seeds_roles_when_they_are_missing(test_db):
+    """The README order starts the app before migrations exist.
+
+    Startup seeding therefore fails against an empty database and is never
+    retried, leaving zero roles. The script must not dead-end there.
+    """
+    role = (
+        await test_db.execute(select(Role).where(Role.slug == "super-admin"))
+    ).scalar_one_or_none()
+    if role is not None:
+        await test_db.execute(delete(UserRole).where(UserRole.role_id == role.id))
+        await test_db.execute(
+            delete(RolePermission).where(RolePermission.role_id == role.id)
+        )
+        await test_db.commit()
+        await test_db.delete(role)
+        await test_db.commit()
+
+    await create_superadmin(
+        test_db, "boss8@example.com", "Str0ng@Pass1", "Boss", seed_if_missing=True
+    )
+
+    user = (
+        await test_db.execute(select(User).where(User.email == "boss8@example.com"))
+    ).scalar_one()
+    seeded = (
+        await test_db.execute(select(Role).where(Role.slug == "super-admin"))
+    ).scalar_one()
+    link = (
+        await test_db.execute(
+            select(UserRole).where(
+                UserRole.user_id == user.id, UserRole.role_id == seeded.id
+            )
+        )
+    ).scalar_one_or_none()
+    assert link is not None, "role was seeded but never attached"
+
+
+@pytest.mark.asyncio
 async def test_refuses_to_run_without_the_super_admin_role(test_db):
     """Silently creating a role-less admin would look like success."""
     # The suite shares a database, so the role may already be seeded by
@@ -104,6 +143,10 @@ async def test_refuses_to_run_without_the_super_admin_role(test_db):
     ).scalar_one_or_none()
     if role is not None:
         await test_db.execute(delete(UserRole).where(UserRole.role_id == role.id))
+        await test_db.execute(
+            delete(RolePermission).where(RolePermission.role_id == role.id)
+        )
+        await test_db.commit()
         await test_db.delete(role)
         await test_db.commit()
 
