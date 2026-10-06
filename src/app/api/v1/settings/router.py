@@ -94,10 +94,10 @@ async def list_public_settings(
 async def upload_logo(
     file: UploadFile = File(...),
     request: Request = None,  # type: ignore[assignment]
-    current_user: dict = Depends(require_permission("settings.manage")),
+    current_user: dict = Depends(require_permission("settings.update")),
     db: AsyncSession = Depends(get_db),
 ):
-    """Upload app logo (jpg/png/svg/webp, max 2 MB). Requires settings.manage permission."""
+    """Upload app logo (jpg/png/svg/webp, max 2 MB). Requires settings.update permission."""
     url = await _save_upload(file, _LOGO_ALLOWED, _LOGO_EXTENSIONS, _LOGO_MAX_BYTES)
 
     user_id_str = current_user.get("sub")
@@ -127,10 +127,10 @@ async def upload_logo(
 async def upload_favicon(
     file: UploadFile = File(...),
     request: Request = None,  # type: ignore[assignment]
-    current_user: dict = Depends(require_permission("settings.manage")),
+    current_user: dict = Depends(require_permission("settings.update")),
     db: AsyncSession = Depends(get_db),
 ):
-    """Upload app favicon (ico/png, max 512 KB). Requires settings.manage permission."""
+    """Upload app favicon (ico/png, max 512 KB). Requires settings.update permission."""
     url = await _save_upload(file, _FAVICON_ALLOWED, _FAVICON_EXTENSIONS, _FAVICON_MAX_BYTES)
 
     user_id_str = current_user.get("sub")
@@ -171,7 +171,7 @@ async def update_setting(
     key: str,
     body: UpdateSettingRequest,
     request: Request,
-    current_user: dict = Depends(require_permission("settings.manage")),
+    current_user: dict = Depends(require_permission("settings.update")),
     db: AsyncSession = Depends(get_db),
 ):
     user_id_str = current_user.get("sub")

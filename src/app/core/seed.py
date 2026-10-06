@@ -58,7 +58,106 @@ SEED_PERMISSIONS = [
      "group": "Platform", "description": "View application settings and appearance."},
     {"slug": "settings.manage", "name": "Change settings", "module": "settings", "action": "manage",
      "group": "Platform", "description": "Change app name, branding, colours, and limits."},
+    # ── Navigation (split out of the former menu.manage) ──
+    {"slug": "menu.create", "name": "Create navigation items", "module": "menu", "action": "create",
+     "group": "Navigation", "description": "Add a new item to the navigation menu."},
+    {"slug": "menu.update", "name": "Edit navigation items", "module": "menu", "action": "update",
+     "group": "Navigation", "description": "Rename, reorder, or re-point an existing item."},
+    {"slug": "menu.delete", "name": "Delete navigation items", "module": "menu", "action": "delete",
+     "group": "Navigation", "description": "Remove an item and its children from the menu.",
+     "is_dangerous": True},
+
+    # ── Platform settings (split out of the former settings.manage) ──
+    {"slug": "settings.create", "name": "Add settings", "module": "settings", "action": "create",
+     "group": "Platform", "description": "Define a new application setting."},
+    {"slug": "settings.update", "name": "Edit settings", "module": "settings", "action": "update",
+     "group": "Platform", "description": "Change branding, limits, and other app settings."},
+    {"slug": "settings.delete", "name": "Delete settings", "module": "settings", "action": "delete",
+     "group": "Platform", "description": "Remove an application setting.", "is_dangerous": True},
+
+    # ── Notifications (split out of the former notifications.manage) ──
+    {"slug": "notifications.create", "name": "Send notifications", "module": "notifications", "action": "create",
+     "group": "Workspace", "description": "Send a notification to other users."},
+    {"slug": "notifications.update", "name": "Edit notifications", "module": "notifications", "action": "update",
+     "group": "Workspace", "description": "Mark notifications read or amend them."},
+    {"slug": "notifications.delete", "name": "Delete notifications", "module": "notifications", "action": "delete",
+     "group": "Workspace", "description": "Remove notifications.", "is_dangerous": True},
+
+    # ── Approval, the governance action the matrix exposes ──
+    {"slug": "users.approve", "name": "Approve user requests", "module": "users", "action": "approve",
+     "group": "Users", "description": "Approve pending accounts and access requests."},
+    {"slug": "settings.approve", "name": "Approve setting changes", "module": "settings", "action": "approve",
+     "group": "Platform", "description": "Sign off changes that need a second pair of eyes."},
 ]
+
+
+# Columns of the Roles & Permissions matrix, in display order.
+MATRIX_ACTIONS = ["read", "create", "update", "delete", "approve"]
+
+# Human labels for the resource rows. A module without an entry falls back to
+# its slug, so adding a module never makes it vanish from the matrix.
+MODULE_LABELS = {
+    "users": "User Management",
+    "roles": "Roles & Permissions",
+    "permissions": "Roles & Permissions",
+    "menu": "Menu Management",
+    "settings": "Settings",
+    "notifications": "Notifications",
+    "audit": "Audit Log",
+    "dashboard": "Dashboard",
+    "profile": "Profile",
+}
+
+# Order the rows so the resources an admin touches most sit at the top.
+MODULE_ORDER = [
+    "users", "roles", "permissions", "menu",
+    "settings", "notifications", "audit", "dashboard", "profile",
+]
+
+
+def matrix_rows(permissions: list[dict] | None = None) -> list[dict]:
+    """Build the RESOURCE x ACTION grid from the permission catalogue.
+
+    Every cell reports whether the action exists for that resource. A cell
+    that does not apply must be rendered as unavailable rather than left
+    blank — an empty checkbox reads as "not granted yet", which is a
+    different and misleading claim.
+    """
+    rows_src = permissions if permissions is not None else SEED_PERMISSIONS
+
+    by_module: dict[str, dict[str, str]] = {}
+    for p in rows_src:
+        by_module.setdefault(p["module"], {})[p["action"]] = p["slug"]
+
+    def rank(module: str) -> int:
+        return MODULE_ORDER.index(module) if module in MODULE_ORDER else len(MODULE_ORDER)
+
+    out: list[dict] = []
+    for module in sorted(by_module, key=lambda m: (rank(m), m)):
+        actions = by_module[module]
+        cells = {
+            action: {
+                "available": action in actions,
+                "slug": actions.get(action),
+            }
+            for action in MATRIX_ACTIONS
+        }
+        out.append(
+            {
+                "module": module,
+                "label": MODULE_LABELS.get(module, module.replace("_", " ").title()),
+                "cells": cells,
+                # Slugs that exist for this module but have no column of their
+                # own (menu.manage, permissions.assign, ...). Hiding them would
+                # silently drop granted rights from the UI.
+                "extra": sorted(
+                    slug for action, slug in actions.items()
+                    if action not in MATRIX_ACTIONS
+                ),
+            }
+        )
+    return out
+
 
 SEED_ROLES = [
     {"name": "Super Admin", "slug": "super-admin", "description": "Full system access",

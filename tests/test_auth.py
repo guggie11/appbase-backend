@@ -248,6 +248,7 @@ class TestAcceptInvitation:
 
         # Verify user is now active + verified
         from sqlalchemy import select
+
         from app.models.user import User
         result = await test_db.execute(select(User).where(User.id == user.id))
         updated = result.scalar_one()
