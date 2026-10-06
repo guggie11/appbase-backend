@@ -99,7 +99,7 @@ MATRIX_ACTIONS = ["read", "create", "update", "delete", "approve"]
 MODULE_LABELS = {
     "users": "User Management",
     "roles": "Roles & Permissions",
-    "permissions": "Roles & Permissions",
+    "permissions": "Permission Catalogue",
     "menu": "Menu Management",
     "settings": "Settings",
     "notifications": "Notifications",
