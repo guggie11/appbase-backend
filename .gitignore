@@ -36,7 +36,10 @@ htmlcov/
 coverage.xml
 
 # Alembic
-alembic/versions/*.py
+# Migrations MUST be committed: they are the schema's source of truth, and a
+# fresh clone cannot build its database without them. Only the local scratch
+# file Alembic writes during autogenerate is ignored.
+alembic/versions/*.tmp
 
 # OpenAPI export
 openapi.json

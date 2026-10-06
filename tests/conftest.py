@@ -4,9 +4,8 @@ Uses SQLite in-memory (aiosqlite) + fakeredis so no live DB/Redis is needed.
 """
 import uuid
 from collections.abc import AsyncGenerator
-from datetime import UTC, datetime, timedelta
+from datetime import datetime
 
-import pytest
 import pytest_asyncio
 from fakeredis import aioredis as fake_aioredis
 from httpx import ASGITransport, AsyncClient
@@ -67,8 +66,8 @@ async def test_db() -> AsyncGenerator[AsyncSession, None]:
 @pytest_asyncio.fixture(autouse=True)
 async def fake_redis(monkeypatch):
     """Replace the global redis_client with fakeredis for every test."""
-    import app.core.redis as redis_module
     import app.api.deps as deps_module
+    import app.core.redis as redis_module
 
     fake = fake_aioredis.FakeRedis(decode_responses=True)
     monkeypatch.setattr(redis_module, "redis_client", fake)
@@ -87,9 +86,9 @@ async def async_client(test_db: AsyncSession) -> AsyncGenerator[AsyncClient, Non
     from slowapi import Limiter
     from slowapi.util import get_remote_address
 
-    from app.main import app
-    from app.api.deps import get_db
     import app.api.v1.auth.router as auth_router_module
+    from app.api.deps import get_db
+    from app.main import app
 
     # Override DB
     async def override_get_db():
@@ -180,15 +179,22 @@ def create_role(test_db: AsyncSession):
         name: str = "",
         permissions: list[str] | None = None,
     ):
-        role = Role(
-            id=uuid.uuid4(),
-            name=name or slug,
-            slug=slug,
-            is_system=False,
-            is_active=True,
-        )
-        test_db.add(role)
-        await test_db.flush()
+        from sqlalchemy import select
+
+        # Reuse an existing role: the seed now creates super-admin and user,
+        # so a blind insert collides on roles.slug.
+        existing = await test_db.execute(select(Role).where(Role.slug == slug))
+        role = existing.scalar_one_or_none()
+        if role is None:
+            role = Role(
+                id=uuid.uuid4(),
+                name=name or slug,
+                slug=slug,
+                is_system=False,
+                is_active=True,
+            )
+            test_db.add(role)
+            await test_db.flush()
 
         for perm_slug in permissions or []:
             # upsert permission

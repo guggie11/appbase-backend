@@ -79,6 +79,16 @@ class AcceptInvitationRequest(BaseModel):
         return v
 
 
+class RoleBrief(BaseModel):
+    """Just enough role identity for the UI to reason about."""
+
+    id: uuid.UUID
+    name: str
+    slug: str
+
+    model_config = {"from_attributes": True}
+
+
 class UserResponse(BaseModel):
     id: uuid.UUID
     name: str
@@ -88,6 +98,10 @@ class UserResponse(BaseModel):
     is_verified: bool
     last_login_at: datetime | None = None
     created_at: datetime
+    roles: list[RoleBrief] = []
+    # Flat, de-duplicated slugs ("users.read"). The UI does a plain lookup;
+    # without this it cannot evaluate permissions at all.
+    permissions: list[str] = []
 
     model_config = {"from_attributes": True}
 

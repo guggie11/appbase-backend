@@ -208,6 +208,79 @@ async def assign_roles(db: AsyncSession, user_id: uuid.UUID, role_ids: list[uuid
     return await _get_user_with_roles(db, user_id)
 
 
+async def import_users(db: AsyncSession, raw: bytes) -> dict:
+    """Create users from a CSV, reporting each row's outcome.
+
+    Deliberately row-by-row: one malformed line in fifty must not discard the
+    other forty-nine, and the operator needs to know which lines failed and
+    why rather than just "import failed".
+    """
+    import csv
+    import io
+    import re
+    import secrets
+
+    from app.core.security import hash_password
+
+    try:
+        text = raw.decode("utf-8-sig")
+    except UnicodeDecodeError as exc:
+        raise AppException(
+            code="USERS_IMPORT_NOT_UTF8",
+            message="File harus berformat UTF-8",
+            status_code=400,
+        ) from exc
+
+    reader = csv.DictReader(io.StringIO(text))
+    headers = {(h or "").strip().lower() for h in (reader.fieldnames or [])}
+    if "email" not in headers:
+        raise AppException(
+            code="USERS_IMPORT_MISSING_EMAIL_COLUMN",
+            message="CSV harus memiliki kolom 'email'",
+            status_code=400,
+        )
+
+    email_re = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+    created = 0
+    errors: list[dict] = []
+
+    # Line 1 is the header, so data starts at 2 — the number the operator
+    # sees in their spreadsheet.
+    for line_no, row in enumerate(reader, start=2):
+        email = (row.get("email") or "").strip().lower()
+        name = (row.get("name") or "").strip()
+
+        if not email:
+            errors.append({"row": line_no, "reason": "Email kosong"})
+            continue
+        if not email_re.match(email):
+            errors.append({"row": line_no, "reason": f"Email tidak valid: {email}"})
+            continue
+
+        existing = await db.execute(select(User).where(User.email == email))
+        if existing.scalar_one_or_none() is not None:
+            errors.append({"row": line_no, "reason": f"Email sudah terdaftar: {email}"})
+            continue
+
+        db.add(
+            User(
+                id=uuid.uuid4(),
+                name=name or email.split("@")[0],
+                email=email,
+                # No usable password: the account starts pending and the user
+                # sets their own via the invitation flow.
+                password_hash=hash_password(secrets.token_urlsafe(32)),
+                status="pending",
+                is_verified=False,
+            )
+        )
+        await db.flush()
+        created += 1
+
+    await db.commit()
+    return {"created": created, "failed": len(errors), "errors": errors}
+
+
 async def upload_avatar(
     db: AsyncSession,
     user_id: uuid.UUID,

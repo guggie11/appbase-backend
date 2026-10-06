@@ -4,6 +4,7 @@ from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.core import exceptions as exc
 from app.core.security import (
@@ -13,6 +14,7 @@ from app.core.security import (
     sha256_hex,
     verify_password,
 )
+from app.models.rbac import Role, RolePermission, UserRole
 from app.models.token import LoginAttempt, RefreshToken
 from app.models.user import EmailVerification, PasswordHistory, PasswordReset, User
 
@@ -334,11 +336,37 @@ async def resend_verification(db: AsyncSession, email: str) -> str | None:
 
 
 async def get_user_by_id(db: AsyncSession, user_id: uuid.UUID) -> User:
-    result = await db.execute(select(User).where(User.id == user_id, User.deleted_at.is_(None)))
+    # Eager-load two levels: serialising roles and permissions outside the
+    # greenlet would otherwise raise MissingGreenlet, and lazy loading here
+    # means one query per role.
+    result = await db.execute(
+        select(User)
+        .options(
+            selectinload(User.user_roles)
+            .selectinload(UserRole.role)
+            .selectinload(Role.role_permissions)
+            .selectinload(RolePermission.permission)
+        )
+        .where(User.id == user_id, User.deleted_at.is_(None))
+    )
     user = result.scalar_one_or_none()
     if not user:
         raise exc.auth_user_not_found()
     return user
+
+
+def collect_permissions(user: User) -> list[str]:
+    """Flatten a user's role permissions into sorted, unique slugs."""
+    slugs: set[str] = set()
+    for ur in user.user_roles or []:
+        role = getattr(ur, "role", None)
+        if role is None or not getattr(role, "is_active", True):
+            continue
+        for rp in role.role_permissions or []:
+            perm = getattr(rp, "permission", None)
+            if perm is not None:
+                slugs.add(perm.slug)
+    return sorted(slugs)
 
 
 async def accept_invitation(db: AsyncSession, token: str, new_password: str) -> None:

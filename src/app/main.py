@@ -1,3 +1,4 @@
+import logging
 import pathlib
 from contextlib import asynccontextmanager
 
@@ -24,15 +25,28 @@ async def lifespan(app: FastAPI):
     # startup: seed roles & permissions
     try:
         from app.core.database import AsyncSessionLocal
-        from app.core.seed import seed_permissions, seed_roles, seed_settings
+        from app.core.seed import (
+            seed_permissions,
+            seed_role_permissions,
+            seed_roles,
+            seed_settings,
+        )
 
         async with AsyncSessionLocal() as db:
             await seed_permissions(db)
             await seed_roles(db)
+            # Must run after both: this is what actually grants rights.
+            await seed_role_permissions(db)
             await seed_settings(db)
-    except Exception:
-        # Don't fail startup if DB is unavailable (e.g., tests)
-        pass
+    except Exception as exc:
+        # Startup must still succeed without a database (tests, or a first
+        # boot before the DB is healthy). But swallowing this silently gave a
+        # running app with no roles and no explanation anywhere.
+        logging.getLogger(__name__).warning(
+            "seeding skipped: %s — the app will start, but roles, permissions "
+            "and settings may be missing until the database is reachable",
+            exc,
+        )
     yield
     # shutdown
 
@@ -50,8 +64,9 @@ app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 app.add_exception_handler(AppException, app_exception_handler)  # type: ignore[arg-type]
 
-# Static files for avatars
+# Static files for avatars and logos/favicons
 pathlib.Path("static/avatars").mkdir(parents=True, exist_ok=True)
+pathlib.Path("static/logos").mkdir(parents=True, exist_ok=True)
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
 # Middlewares (order matters — outermost = last added)

@@ -6,7 +6,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import AppException
-from app.models.rbac import Permission, Role, RolePermission
+from app.models.rbac import Permission, Role, RolePermission, UserRole
 
 
 def _slugify(name: str) -> str:
@@ -34,7 +34,26 @@ async def list_roles(
     query = query.order_by(Role.created_at).offset((page - 1) * per_page).limit(per_page)
     result = await db.execute(query)
     roles = result.scalars().all()
+
+    # Attach how many users hold each role. One aggregate query for the page,
+    # not one per row — and a real number rather than the schema default,
+    # which would silently report 0 for every role.
+    await _attach_user_counts(db, roles)
     return list(roles), total
+
+
+async def _attach_user_counts(db: AsyncSession, roles) -> None:
+    if not roles:
+        return
+    ids = [r.id for r in roles]
+    rows = await db.execute(
+        select(UserRole.role_id, func.count(UserRole.user_id))
+        .where(UserRole.role_id.in_(ids))
+        .group_by(UserRole.role_id)
+    )
+    counts = dict(rows.all())
+    for role in roles:
+        role.user_count = counts.get(role.id, 0)
 
 
 async def get_role(db: AsyncSession, role_id: uuid.UUID) -> Role:
@@ -59,6 +78,21 @@ async def create_role(db: AsyncSession, name: str, description: str | None = Non
     return role
 
 
+def _reject_if_platform(role: Role) -> None:
+    """Platform roles own the system and must stay immutable via the API.
+
+    Hiding the button in the UI is cosmetic — anyone can still call the
+    endpoint. If Super Admin's permissions were stripped, the deployment
+    would lock itself out with no way back in.
+    """
+    if getattr(role, "kind", "custom") == "platform":
+        raise AppException(
+            code="ROLES_PLATFORM_ROLE_LOCKED",
+            message="Platform role tidak dapat diubah atau dihapus",
+            status_code=403,
+        )
+
+
 async def update_role(
     db: AsyncSession,
     role_id: uuid.UUID,
@@ -67,6 +101,7 @@ async def update_role(
     is_active: bool | None = None,
 ) -> Role:
     role = await get_role(db, role_id)
+    _reject_if_platform(role)
 
     if name is not None:
         if role.is_system:
@@ -92,8 +127,50 @@ async def update_role(
     return role
 
 
+async def duplicate_role(db: AsyncSession, role_id: uuid.UUID, name: str) -> Role:
+    """Copy a role along with every permission it grants.
+
+    Building a near-identical role otherwise means re-ticking twenty boxes by
+    hand. Platform roles are copyable — the lock protects the original, and a
+    copy starts life as an ordinary custom role.
+    """
+    source = await get_role(db, role_id)
+
+    slug = _slugify(name)
+    existing = await db.execute(select(Role).where(Role.slug == slug))
+    if existing.scalar_one_or_none():
+        raise AppException(
+            code="ROLES_SLUG_ALREADY_EXISTS",
+            message="Role dengan nama ini sudah ada",
+            status_code=409,
+        )
+
+    copy = Role(
+        id=uuid.uuid4(),
+        name=name,
+        slug=slug,
+        description=source.description,
+        is_system=False,
+        is_active=True,
+        kind="custom",
+    )
+    db.add(copy)
+    await db.flush()
+
+    rows = await db.execute(
+        select(RolePermission.permission_id).where(RolePermission.role_id == source.id)
+    )
+    for (permission_id,) in rows.all():
+        db.add(RolePermission(role_id=copy.id, permission_id=permission_id))
+
+    await db.commit()
+    await db.refresh(copy)
+    return copy
+
+
 async def delete_role(db: AsyncSession, role_id: uuid.UUID) -> None:
     role = await get_role(db, role_id)
+    _reject_if_platform(role)
     if role.is_system:
         raise AppException(
             code="ROLES_CANNOT_DELETE_SYSTEM_ROLE",
@@ -121,6 +198,8 @@ async def assign_permissions(
     db: AsyncSession, role_id: uuid.UUID, permission_ids: list[uuid.UUID]
 ) -> list[Permission]:
     role = await get_role(db, role_id)
+    # The dangerous one: stripping these would lock the deployment out.
+    _reject_if_platform(role)
 
     # Validate permissions exist
     for pid in permission_ids:

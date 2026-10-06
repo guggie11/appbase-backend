@@ -2,38 +2,175 @@
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.rbac import Permission, Role
+from app.models.rbac import Permission, Role, RolePermission
 
+# group  -> which section of the permission matrix the row belongs to
+# danger -> destructive; surfaced in red so it is not ticked casually
 SEED_PERMISSIONS = [
-    {"slug": "users.read", "name": "Read Users", "module": "users", "action": "read"},
-    {"slug": "users.create", "name": "Create Users", "module": "users", "action": "create"},
-    {"slug": "users.update", "name": "Update Users", "module": "users", "action": "update"},
-    {"slug": "users.delete", "name": "Delete Users", "module": "users", "action": "delete"},
-    {"slug": "users.assign_role", "name": "Assign Role to Users", "module": "users", "action": "assign_role"},
-    {"slug": "roles.read", "name": "Read Roles", "module": "roles", "action": "read"},
-    {"slug": "roles.create", "name": "Create Roles", "module": "roles", "action": "create"},
-    {"slug": "roles.update", "name": "Update Roles", "module": "roles", "action": "update"},
-    {"slug": "roles.delete", "name": "Delete Roles", "module": "roles", "action": "delete"},
-    {"slug": "permissions.read", "name": "Read Permissions", "module": "permissions", "action": "read"},
-    {"slug": "permissions.assign", "name": "Assign Permissions", "module": "permissions", "action": "assign"},
-    # Phase 3: Menu Management
-    {"slug": "menu.read", "name": "Read Menus", "module": "menu", "action": "read"},
-    {"slug": "menu.manage", "name": "Manage Menus", "module": "menu", "action": "manage"},
-    # Phase 3: Dashboard
-    {"slug": "dashboard.read", "name": "Read Dashboard", "module": "dashboard", "action": "read"},
-    # Phase 4: Audit Log, Settings, Profile
-    {"slug": "audit.read", "name": "Read Audit Logs", "module": "audit", "action": "read"},
-    {"slug": "settings.read", "name": "Read Settings", "module": "settings", "action": "read"},
-    {"slug": "settings.manage", "name": "Manage Settings", "module": "settings", "action": "manage"},
-    {"slug": "profile.update", "name": "Update Profile", "module": "profile", "action": "update"},
-    # C1: Notifications
-    {"slug": "notifications.read", "name": "Read Notifications", "module": "notifications", "action": "read"},
-    {"slug": "notifications.manage", "name": "Manage Notifications", "module": "notifications", "action": "manage"},
+    # ── Users ──
+    {"slug": "users.read", "name": "View users", "module": "users", "action": "read",
+     "group": "Users", "description": "View the user list and individual profiles."},
+    {"slug": "users.create", "name": "Invite users", "module": "users", "action": "create",
+     "group": "Users", "description": "Invite a new user and send the invitation email."},
+    {"slug": "users.update", "name": "Edit users", "module": "users", "action": "update",
+     "group": "Users", "description": "Change a user's name, email, or status."},
+    {"slug": "users.delete", "name": "Delete users", "module": "users", "action": "delete",
+     "group": "Users", "description": "Remove a user account.", "is_dangerous": True},
+    {"slug": "users.assign_role", "name": "Assign roles to users", "module": "users", "action": "assign_role",
+     "group": "Users", "description": "Grant or revoke a user's roles — changes what they can do."},
+
+    # ── Roles & permissions ──
+    {"slug": "roles.read", "name": "View roles", "module": "roles", "action": "read",
+     "group": "Roles", "description": "View roles and the permissions attached to them."},
+    {"slug": "roles.create", "name": "Create roles", "module": "roles", "action": "create",
+     "group": "Roles", "description": "Define a new role."},
+    {"slug": "roles.update", "name": "Edit roles", "module": "roles", "action": "update",
+     "group": "Roles", "description": "Rename a role or change its description."},
+    {"slug": "roles.delete", "name": "Delete roles", "module": "roles", "action": "delete",
+     "group": "Roles", "description": "Remove a role; its holders lose those rights.",
+     "is_dangerous": True},
+    {"slug": "permissions.read", "name": "View permissions", "module": "permissions", "action": "read",
+     "group": "Roles", "description": "View the full catalogue of permissions."},
+    {"slug": "permissions.assign", "name": "Change role permissions", "module": "permissions", "action": "assign",
+     "group": "Roles", "description": "Change which permissions a role grants.",
+     "is_dangerous": True},
+
+    # ── Navigation ──
+    {"slug": "menu.read", "name": "View navigation", "module": "menu", "action": "read",
+     "group": "Navigation", "description": "View the navigation menu structure."},
+    {"slug": "menu.manage", "name": "Manage navigation", "module": "menu", "action": "manage",
+     "group": "Navigation", "description": "Add, reorder, hide, or delete navigation items."},
+
+    # ── Workspace ──
+    {"slug": "dashboard.read", "name": "View dashboard", "module": "dashboard", "action": "read",
+     "group": "Workspace", "description": "Open the dashboard and see its metrics."},
+    {"slug": "profile.update", "name": "Edit own profile", "module": "profile", "action": "update",
+     "group": "Workspace", "description": "Edit your own name, avatar, and password."},
+    {"slug": "notifications.read", "name": "View own notifications", "module": "notifications", "action": "read",
+     "group": "Workspace", "description": "See your own notifications."},
+    {"slug": "notifications.manage", "name": "Send notifications", "module": "notifications", "action": "manage",
+     "group": "Workspace", "description": "Send notifications and mark them for others."},
+
+    # ── Platform ──
+    {"slug": "audit.read", "name": "View audit log", "module": "audit", "action": "read",
+     "group": "Platform", "description": "Read the immutable record of who changed what."},
+    {"slug": "settings.read", "name": "View settings", "module": "settings", "action": "read",
+     "group": "Platform", "description": "View application settings and appearance."},
+    {"slug": "settings.manage", "name": "Change settings", "module": "settings", "action": "manage",
+     "group": "Platform", "description": "Change app name, branding, colours, and limits."},
+    # ── Navigation (split out of the former menu.manage) ──
+    {"slug": "menu.create", "name": "Create navigation items", "module": "menu", "action": "create",
+     "group": "Navigation", "description": "Add a new item to the navigation menu."},
+    {"slug": "menu.update", "name": "Edit navigation items", "module": "menu", "action": "update",
+     "group": "Navigation", "description": "Rename, reorder, or re-point an existing item."},
+    {"slug": "menu.delete", "name": "Delete navigation items", "module": "menu", "action": "delete",
+     "group": "Navigation", "description": "Remove an item and its children from the menu.",
+     "is_dangerous": True},
+
+    # ── Platform settings (split out of the former settings.manage) ──
+    {"slug": "settings.create", "name": "Add settings", "module": "settings", "action": "create",
+     "group": "Platform", "description": "Define a new application setting."},
+    {"slug": "settings.update", "name": "Edit settings", "module": "settings", "action": "update",
+     "group": "Platform", "description": "Change branding, limits, and other app settings."},
+    {"slug": "settings.delete", "name": "Delete settings", "module": "settings", "action": "delete",
+     "group": "Platform", "description": "Remove an application setting.", "is_dangerous": True},
+
+    # ── Notifications (split out of the former notifications.manage) ──
+    {"slug": "notifications.create", "name": "Send notifications", "module": "notifications", "action": "create",
+     "group": "Workspace", "description": "Send a notification to other users."},
+    {"slug": "notifications.update", "name": "Edit notifications", "module": "notifications", "action": "update",
+     "group": "Workspace", "description": "Mark notifications read or amend them."},
+    {"slug": "notifications.delete", "name": "Delete notifications", "module": "notifications", "action": "delete",
+     "group": "Workspace", "description": "Remove notifications.", "is_dangerous": True},
+
+    # ── Approval, the governance action the matrix exposes ──
+    {"slug": "users.approve", "name": "Approve user requests", "module": "users", "action": "approve",
+     "group": "Users", "description": "Approve pending accounts and access requests."},
+    {"slug": "settings.approve", "name": "Approve setting changes", "module": "settings", "action": "approve",
+     "group": "Platform", "description": "Sign off changes that need a second pair of eyes."},
 ]
 
+
+# Columns of the Roles & Permissions matrix, in display order.
+MATRIX_ACTIONS = ["read", "create", "update", "delete", "approve"]
+
+# Human labels for the resource rows. A module without an entry falls back to
+# its slug, so adding a module never makes it vanish from the matrix.
+MODULE_LABELS = {
+    "users": "User Management",
+    "roles": "Roles & Permissions",
+    "permissions": "Permission Catalogue",
+    "menu": "Menu Management",
+    "settings": "Settings",
+    "notifications": "Notifications",
+    "audit": "Audit Log",
+    "dashboard": "Dashboard",
+    "profile": "Profile",
+}
+
+# Order the rows so the resources an admin touches most sit at the top.
+MODULE_ORDER = [
+    "users", "roles", "permissions", "menu",
+    "settings", "notifications", "audit", "dashboard", "profile",
+]
+
+
+def matrix_rows(permissions: list[dict] | None = None) -> list[dict]:
+    """Build the RESOURCE x ACTION grid from the permission catalogue.
+
+    Every cell reports whether the action exists for that resource. A cell
+    that does not apply must be rendered as unavailable rather than left
+    blank — an empty checkbox reads as "not granted yet", which is a
+    different and misleading claim.
+    """
+    rows_src = permissions if permissions is not None else SEED_PERMISSIONS
+
+    by_module: dict[str, dict[str, str]] = {}
+    for p in rows_src:
+        by_module.setdefault(p["module"], {})[p["action"]] = p["slug"]
+
+    def rank(module: str) -> int:
+        return MODULE_ORDER.index(module) if module in MODULE_ORDER else len(MODULE_ORDER)
+
+    out: list[dict] = []
+    for module in sorted(by_module, key=lambda m: (rank(m), m)):
+        actions = by_module[module]
+        cells = {
+            action: {
+                "available": action in actions,
+                "slug": actions.get(action),
+            }
+            for action in MATRIX_ACTIONS
+        }
+        out.append(
+            {
+                "module": module,
+                "label": MODULE_LABELS.get(module, module.replace("_", " ").title()),
+                "cells": cells,
+                # Slugs that exist for this module but have no column of their
+                # own (menu.manage, permissions.assign, ...). Hiding them would
+                # silently drop granted rights from the UI.
+                "extra": sorted(
+                    slug for action, slug in actions.items()
+                    if action not in MATRIX_ACTIONS
+                ),
+            }
+        )
+    return out
+
+
 SEED_ROLES = [
-    {"name": "Super Admin", "slug": "super-admin", "description": "Full system access", "is_system": True},
-    {"name": "User", "slug": "user", "description": "Standard user", "is_system": True},
+    {"name": "Super Admin", "slug": "super-admin", "description": "Full system access",
+     "is_system": True, "kind": "platform"},
+    {"name": "User", "slug": "user", "description": "Standard user",
+     "is_system": True, "kind": "built-in"},
+]
+
+# What a standard user may do: their own workspace, nothing administrative.
+USER_ROLE_PERMISSIONS = [
+    "dashboard.read",
+    "profile.update",
+    "notifications.read",
 ]
 
 SEED_SETTINGS = [
@@ -42,16 +179,32 @@ SEED_SETTINGS = [
     {"key": "max_login_attempts", "value": "5", "type": "number", "is_public": False, "is_secret": False},
     {"key": "lockout_duration_minutes", "value": "15", "type": "number", "is_public": False, "is_secret": False},
     {"key": "smtp_host", "value": "localhost", "type": "string", "is_public": False, "is_secret": True},
+    # Phase 5: App Appearance Settings
+    {"key": "app_subtitle", "value": "App Template", "type": "string", "is_public": True, "is_secret": False},
+    {"key": "primary_color", "value": "#D94F3D", "type": "string", "is_public": True, "is_secret": False},
+    {"key": "logo_url", "value": "", "type": "string", "is_public": True, "is_secret": False},
+    {"key": "favicon_url", "value": "", "type": "string", "is_public": True, "is_secret": False},
 ]
 
 
 async def seed_permissions(db: AsyncSession) -> None:
+    """Insert missing permissions and backfill metadata on existing ones.
+
+    Existing deployments already hold the 20 slugs without description, group,
+    or danger flag, so an insert-only seed would leave them blank forever.
+    """
     for pdata in SEED_PERMISSIONS:
         result = await db.execute(select(Permission).where(Permission.slug == pdata["slug"]))
         existing = result.scalar_one_or_none()
-        if not existing:
-            perm = Permission(**pdata)
-            db.add(perm)
+        if existing:
+            # Keep the label in sync too: renaming a permission in SEED_PERMISSIONS
+            # otherwise never reaches a deployment that already has the row.
+            existing.name = pdata["name"]
+            existing.description = pdata.get("description")
+            existing.group = pdata.get("group")
+            existing.is_dangerous = pdata.get("is_dangerous", False)
+        else:
+            db.add(Permission(**pdata))
     await db.commit()
 
 
@@ -59,9 +212,51 @@ async def seed_roles(db: AsyncSession) -> None:
     for rdata in SEED_ROLES:
         result = await db.execute(select(Role).where(Role.slug == rdata["slug"]))
         existing = result.scalar_one_or_none()
-        if not existing:
-            role = Role(**rdata)
-            db.add(role)
+        if existing:
+            # Backfill: roles created before `kind` existed default to custom,
+            # which would leave the platform role unprotected.
+            existing.kind = rdata["kind"]
+        else:
+            db.add(Role(**rdata))
+    await db.commit()
+
+
+async def seed_role_permissions(db: AsyncSession) -> None:
+    """Attach permissions to the seeded roles.
+
+    Previously the seed created permissions and roles but never linked them:
+    Super Admin held zero rights and only worked because of a hard-coded
+    bypass, while any ordinary role could never be granted anything.
+
+    Idempotent — the seed runs on every startup.
+    """
+    perms = {p.slug: p for p in (await db.execute(select(Permission))).scalars().all()}
+    roles = {r.slug: r for r in (await db.execute(select(Role))).scalars().all()}
+
+    wanted: dict[str, list[str]] = {
+        "super-admin": list(perms.keys()),
+        "user": USER_ROLE_PERMISSIONS,
+    }
+
+    for role_slug, slugs in wanted.items():
+        role = roles.get(role_slug)
+        if role is None:
+            continue
+
+        existing = {
+            rp.permission_id
+            for rp in (
+                await db.execute(
+                    select(RolePermission).where(RolePermission.role_id == role.id)
+                )
+            ).scalars().all()
+        }
+
+        for slug in slugs:
+            perm = perms.get(slug)
+            if perm is not None and perm.id not in existing:
+                db.add(RolePermission(role_id=role.id, permission_id=perm.id))
+
     await db.commit()
 
 
