@@ -123,6 +123,18 @@ def test_write_endpoints_are_audited(spec):
     assert code.count("log_action") >= 3, "create/update/delete must be audited"
 
 
+def test_audit_calls_match_the_real_signature(spec):
+    """log_action takes user_id/action/module/entity_id, and the caller
+    commits. An invented signature means every audit row is dropped."""
+    code = render_router(spec)
+    assert "actor_id=" not in code
+    assert "resource_id=" not in code
+    assert "user_id=current_user" in code
+    assert "module=" in code
+    assert "entity_id=" in code
+    assert code.count("await db.commit()") >= 3, "audit rows are never committed"
+
+
 # ---------------------------------------------------------------------------
 # Model and schema
 # ---------------------------------------------------------------------------
