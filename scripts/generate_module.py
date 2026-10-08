@@ -134,7 +134,13 @@ class ModuleSpec:
 
     @property
     def label(self) -> str:
+        """Singular, for a record: "Purchase Order"."""
         return re.sub(r"(?<!^)(?=[A-Z])", " ", self.class_name)
+
+    @property
+    def plural_label(self) -> str:
+        """Plural, for anything naming the collection: a list page, a menu."""
+        return " ".join(w.capitalize() for w in self.plural.split("_"))
 
     def permission(self, action: str) -> str:
         return f"{self.singular}.{action}"
@@ -539,7 +545,7 @@ def upgrade() -> None:
             WHERE NOT EXISTS (SELECT 1 FROM menus WHERE path = :path)
             """
         ).bindparams(
-            label="{spec.label}", icon="Box", path="{spec.route_prefix}",
+            label="{spec.plural_label}", icon="Box", path="{spec.route_prefix}",
             perm="{spec.permission("read")}",
         )
     )
@@ -899,6 +905,10 @@ def main(argv: list[str] | None = None) -> int:
         help='comma-separated "name:type" pairs; type defaults to str',
     )
     parser.add_argument(
+        "--frontend", metavar="PATH",
+        help="also generate the page, modal, and queries in the frontend repo",
+    )
+    parser.add_argument(
         "--dry-run", action="store_true",
         help="show what would be written without touching anything",
     )
@@ -914,6 +924,11 @@ def main(argv: list[str] | None = None) -> int:
     try:
         spec = ModuleSpec(name=args.name, fields=parse_fields(args.fields))
         summary = generate(spec, dry_run=args.dry_run)
+        if args.frontend:
+            fe_root = Path(args.frontend).expanduser().resolve()
+            summary.append("")
+            summary.append(f"frontend ({fe_root}):")
+            summary.extend(generate_frontend(spec, fe_root, dry_run=args.dry_run))
     except (ValueError, FileExistsError, RuntimeError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
@@ -926,12 +941,584 @@ def main(argv: list[str] | None = None) -> int:
         + ", ".join(spec.permission(a) for a in ("read", "create", "update", "delete"))
     )
     if not args.dry_run:
-        print(
-            "\nnext:\n"
-            "  uv run alembic upgrade head\n"
-            f"  uv run pytest tests/test_{spec.plural}.py"
-        )
+        steps = [
+            "  uv run alembic upgrade head",
+            f"  uv run pytest tests/test_{spec.plural}.py",
+        ]
+        if args.frontend:
+            steps.append("  (frontend) pnpm build")
+        print("\nnext:\n" + "\n".join(steps))
     return 0
+
+
+
+# ---------------------------------------------------------------------------
+# Frontend renderers
+# ---------------------------------------------------------------------------
+
+#: Python field type -> TypeScript type.
+TS_TYPES = {
+    "str": "string",
+    "text": "string",
+    "int": "number",
+    "float": "number",
+    "bool": "boolean",
+    "datetime": "string",
+    "uuid": "string",
+}
+
+#: Python field type -> the input element that suits it. A long note in a
+#: single-line input is unusable; a boolean in a text box is nonsense.
+#: Field type -> input element. A long note in a single-line box is unusable.
+#: The bool entry is never read — booleans take an earlier branch that emits
+#: a labelled checkbox — but the key must exist because the lookup happens
+#: before that branch is chosen.
+INPUT_KINDS = {
+    "str": "text",
+    "text": "textarea",
+    "int": "number",
+    "float": "number",
+    "bool": "checkbox",
+    "datetime": "datetime-local",
+    "uuid": "text",
+}
+
+
+def _title(name: str) -> str:
+    """price -> Price, is_active -> Active.
+
+    The is_ prefix is a schema detail; rendering it as a column header
+    leaks the database into the interface.
+    """
+    words = name.split("_")
+    if len(words) > 1 and words[0] == "is":
+        words = words[1:]
+    return words[0].capitalize() + ("" if len(words) == 1 else " " + " ".join(words[1:]))
+
+
+def render_fe_types(spec: ModuleSpec) -> str:
+    fields = "\n".join(
+        f"  {f.name}: {TS_TYPES[f.py_type]}"
+        + ("" if f.py_type == "bool" else " | null")
+        for f in spec.fields
+    )
+    return f'''export interface {spec.class_name} {{
+  id: string
+{fields}
+  created_at: string
+  updated_at: string
+}}
+'''
+
+
+def render_fe_queries(spec: ModuleSpec) -> str:
+    cls = spec.class_name
+    # Derive the hook name from the actual plural so Category -> useCategories.
+    plural_pascal = "".join(w.capitalize() for w in spec.plural.split("_"))
+    route = spec.route_prefix
+    payload_type = "\n".join(
+        f"  {f.name}?: {TS_TYPES[f.py_type]} | null" for f in spec.fields
+    )
+    return f'''import {{ useMutation, useQuery, useQueryClient }} from '@tanstack/react-query'
+
+import {{ apiClient }} from '@/shared/api/client'
+import type {{ ApiSuccess, PaginatedResponse, {cls} }} from '@/shared/api/types'
+
+export interface {cls}Payload {{
+{payload_type}
+}}
+
+const KEY = '{spec.plural}'
+
+export function use{plural_pascal}(page = 1, perPage = 10) {{
+  return useQuery({{
+    queryKey: [KEY, page, perPage],
+    queryFn: async () => {{
+      const res = await apiClient.get<PaginatedResponse<{cls}>>(
+        `{route}/?page=${{page}}&per_page=${{perPage}}`,
+      )
+      return res.data
+    }},
+  }})
+}}
+
+export function use{cls}(id: string) {{
+  return useQuery({{
+    queryKey: [KEY, id],
+    queryFn: async () => {{
+      const res = await apiClient.get<ApiSuccess<{cls}>>(`{route}/${{id}}`)
+      return res.data.data
+    }},
+    enabled: Boolean(id),
+  }})
+}}
+
+export function useCreate{cls}() {{
+  const qc = useQueryClient()
+  return useMutation({{
+    mutationFn: async (payload: {cls}Payload) => {{
+      const res = await apiClient.post<ApiSuccess<{cls}>>('{route}/', payload)
+      return res.data.data
+    }},
+    // Returned, not just fired: the mutation then settles after the
+    // refetch, so the table never shows a row that is already gone.
+    onSuccess: () => {{ return qc.invalidateQueries({{ queryKey: [KEY] }}) }},
+  }})
+}}
+
+export function useUpdate{cls}() {{
+  const qc = useQueryClient()
+  return useMutation({{
+    mutationFn: async ({{ id, ...payload }}: {cls}Payload & {{ id: string }}) => {{
+      const res = await apiClient.put<ApiSuccess<{cls}>>(`{route}/${{id}}`, payload)
+      return res.data.data
+    }},
+    onSuccess: () => {{ return qc.invalidateQueries({{ queryKey: [KEY] }}) }},
+  }})
+}}
+
+export function useDelete{cls}() {{
+  const qc = useQueryClient()
+  return useMutation({{
+    mutationFn: async (id: string) => {{
+      await apiClient.delete(`{route}/${{id}}`)
+    }},
+    onSuccess: () => {{ return qc.invalidateQueries({{ queryKey: [KEY] }}) }},
+  }})
+}}
+'''
+
+
+def render_fe_page(spec: ModuleSpec) -> str:
+    cls = spec.class_name
+    plural_pascal = "".join(w.capitalize() for w in spec.plural.split("_"))
+
+    # Columns: booleans read better as Yes/No than as "true".
+    cols = []
+    for f in spec.fields:
+        if f.py_type == "bool":
+            cell = (
+                "      cell: ({ getValue }) => ("
+                "\n        <span style={{ fontSize: 13, color: '#44474a' }}>"
+                "\n          {getValue() ? 'Yes' : 'No'}"
+                "\n        </span>"
+                "\n      ),"
+            )
+        else:
+            cell = (
+                "      cell: ({ getValue }) => ("
+                "\n        <span style={{ fontSize: 13, color: '#1b1c1e' }}>"
+                "\n          {String(getValue() ?? '—')}"
+                "\n        </span>"
+                "\n      ),"
+            )
+        cols.append(
+            "    {\n"
+            f"      accessorKey: '{f.name}',\n"
+            f"      header: '{_title(f.name)}',\n"
+            f"{cell}\n"
+            "    },"
+        )
+    columns = "\n".join(cols)
+
+    return f'''import {{ useMemo, useState }} from 'react'
+import {{ ChevronLeft, ChevronRight, Pencil, Plus, Trash2 }} from 'lucide-react'
+import type {{ ColumnDef }} from '@tanstack/react-table'
+
+import {{ DataTable }} from '@/shared/ui/DataTable'
+import {{ DeleteConfirmDialog }} from '@/pages/users/components/DeleteConfirmDialog'
+import {{ usePermission }} from '@/features/auth/usePermission'
+import {{ use{plural_pascal}, useDelete{cls} }} from '@/features/{spec.singular}/queries'
+import type {{ {cls} }} from '@/shared/api/types'
+import {{ {cls}Modal }} from './components/{cls}Modal'
+
+export function {plural_pascal}Page() {{
+  const [page, setPage] = useState(1)
+  const [modalOpen, setModalOpen] = useState(false)
+  const [editing, setEditing] = useState<{cls} | null>(null)
+  const [pendingDelete, setPendingDelete] = useState<{cls} | null>(null)
+
+  const {{ data, isLoading }} = use{plural_pascal}(page)
+  const deleteMutation = useDelete{cls}()
+
+  // Hiding an action the backend will refuse is kinder than showing a
+  // button that always fails.
+  const canCreate = usePermission('{spec.permission("create")}')
+  const canUpdate = usePermission('{spec.permission("update")}')
+  const canDelete = usePermission('{spec.permission("delete")}')
+
+  const rows = data?.data ?? []
+  const meta = data?.meta
+
+  const columns = useMemo<ColumnDef<{cls}, unknown>[]>(() => [
+{columns}
+    {{
+      id: 'actions',
+      header: '',
+      cell: ({{ row }}) => (
+        <div style={{{{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}}}>
+          {{canUpdate && (
+            <button
+              type="button"
+              title="Edit"
+              onClick={{() => {{ setEditing(row.original); setModalOpen(true) }}}}
+              style={{{{
+                display: 'flex', padding: 6, borderRadius: 8,
+                border: '1px solid #e2e3e3', background: 'white', cursor: 'pointer',
+                color: '#44474a',
+              }}}}
+            >
+              <Pencil size={{14}} />
+            </button>
+          )}}
+          {{canDelete && (
+            <button
+              type="button"
+              title="Delete"
+              onClick={{() => setPendingDelete(row.original)}}
+              style={{{{
+                display: 'flex', padding: 6, borderRadius: 8,
+                border: '1px solid #e2e3e3', background: 'white', cursor: 'pointer',
+                color: '#b4442c',
+              }}}}
+            >
+              <Trash2 size={{14}} />
+            </button>
+          )}}
+        </div>
+      ),
+    }},
+  ], [canUpdate, canDelete])
+
+  return (
+    <div style={{{{ display: 'flex', flexDirection: 'column', gap: 20 }}}}>
+      <div style={{{{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}}}>
+        <div>
+          <h1 style={{{{ fontSize: 18, fontWeight: 600, color: '#1b1c1e', margin: 0 }}}}>
+            {spec.plural_label}
+          </h1>
+          <p style={{{{ fontSize: 13, color: '#6c6e70', marginTop: 2 }}}}>
+            Manage {spec.plural.replace("_", " ")}
+          </p>
+        </div>
+        {{canCreate && (
+          <button
+            onClick={{() => {{ setEditing(null); setModalOpen(true) }}}}
+            className="btn-primary"
+          >
+            <Plus size={{14}} />
+            New {spec.label}
+          </button>
+        )}}
+      </div>
+
+      <DataTable
+        data={{rows}}
+        columns={{columns}}
+        isLoading={{isLoading}}
+        emptyMessage="No {spec.plural.replace("_", " ")} yet"
+      />
+
+      {{meta && meta.total_pages > 1 && (
+        <div style={{{{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 4px' }}}}>
+          <p style={{{{ fontSize: 12, color: '#9CA3AF' }}}}>
+            Page {{meta.page}} of {{meta.total_pages}} — {{meta.total}} total
+          </p>
+          <div style={{{{ display: 'flex', alignItems: 'center', gap: 8 }}}}>
+            <button
+              onClick={{() => setPage((p) => Math.max(1, p - 1))}}
+              disabled={{page === 1}}
+              style={{{{ padding: 6, borderRadius: 6, border: '1px solid #E5E7EB', background: 'white', cursor: page === 1 ? 'not-allowed' : 'pointer', opacity: page === 1 ? 0.4 : 1, display: 'flex' }}}}
+            >
+              <ChevronLeft size={{14}} />
+            </button>
+            <button
+              onClick={{() => setPage((p) => Math.min(meta.total_pages, p + 1))}}
+              disabled={{page >= meta.total_pages}}
+              style={{{{ padding: 6, borderRadius: 6, border: '1px solid #E5E7EB', background: 'white', cursor: page >= meta.total_pages ? 'not-allowed' : 'pointer', opacity: page >= meta.total_pages ? 0.4 : 1, display: 'flex' }}}}
+            >
+              <ChevronRight size={{14}} />
+            </button>
+          </div>
+        </div>
+      )}}
+
+      <{cls}Modal
+        open={{modalOpen}}
+        onClose={{() => {{ setModalOpen(false); setEditing(null) }}}}
+        record={{editing}}
+      />
+
+      <DeleteConfirmDialog
+        open={{Boolean(pendingDelete)}}
+        title="Delete {spec.label}"
+        description="This cannot be undone."
+        isPending={{deleteMutation.isPending}}
+        onConfirm={{() => {{
+          if (pendingDelete) {{
+            deleteMutation.mutate(pendingDelete.id, {{
+              onSuccess: () => setPendingDelete(null),
+            }})
+          }}
+        }}}}
+        onCancel={{() => setPendingDelete(null)}}
+      />
+    </div>
+  )
+}}
+'''
+
+
+def render_fe_modal(spec: ModuleSpec) -> str:
+    cls = spec.class_name
+
+    zod_lines, default_lines, field_blocks = [], [], []
+    for f in spec.fields:
+        kind = INPUT_KINDS[f.py_type]
+        label = _title(f.name)
+
+        if f.py_type == "bool":
+            zod_lines.append(f"  {f.name}: z.boolean(),")
+            default_lines.append(f"      {f.name}: record?.{f.name} ?? false,")
+            field_blocks.append(f'''        <label style={{{{ display: 'flex', alignItems: 'center', gap: 8 }}}}>
+          <input type="checkbox" {{...register('{f.name}')}} />
+          <span style={{{{ fontSize: 13, color: '#1b1c1e' }}}}>{label}</span>
+        </label>''')
+            continue
+
+        if f.py_type in ("int", "float"):
+            coerce = "z.coerce.number()" if f.py_type == "int" else "z.coerce.number()"
+            zod_lines.append(f"  {f.name}: {coerce}.nullish(),")
+        else:
+            zod_lines.append(f"  {f.name}: z.string().nullish(),")
+        default_lines.append(f"      {f.name}: record?.{f.name} ?? undefined,")
+
+        control = (
+            f'<textarea rows={{3}} {{...register(\'{f.name}\')}} style={{inputStyle}} />'
+            if kind == "textarea"
+            else f'<input type="{kind}" {{...register(\'{f.name}\')}} style={{inputStyle}} />'
+        )
+        field_blocks.append(f'''        <div style={{{{ display: 'flex', flexDirection: 'column', gap: 6 }}}}>
+          <label style={{{{ fontSize: 12, color: '#6c6e70' }}}}>{label}</label>
+          {control}
+          {{errors.{f.name} && (
+            <span style={{{{ fontSize: 11, color: '#b4442c' }}}}>
+              {{String(errors.{f.name}?.message)}}
+            </span>
+          )}}
+        </div>''')
+
+    schema = "\n".join(zod_lines)
+    defaults = "\n".join(default_lines)
+    fields_jsx = "\n\n".join(field_blocks)
+
+    return f'''import {{ useEffect }} from 'react'
+import {{ useForm }} from 'react-hook-form'
+import {{ zodResolver }} from '@hookform/resolvers/zod'
+import {{ z }} from 'zod'
+import {{ Loader2 }} from 'lucide-react'
+
+import {{ useCreate{cls}, useUpdate{cls} }} from '@/features/{spec.singular}/queries'
+import type {{ {cls} }} from '@/shared/api/types'
+
+const schema = z.object({{
+{schema}
+}})
+
+type FormValues = z.infer<typeof schema>
+
+const inputStyle: React.CSSProperties = {{
+  fontSize: 13,
+  padding: '8px 10px',
+  borderRadius: 10,
+  border: '1px solid #e2e3e3',
+  background: 'white',
+  color: '#1b1c1e',
+  fontFamily: 'inherit',
+}}
+
+interface Props {{
+  open: boolean
+  onClose: () => void
+  record?: {cls} | null
+}}
+
+export function {cls}Modal({{ open, onClose, record }}: Props) {{
+  const createMutation = useCreate{cls}()
+  const updateMutation = useUpdate{cls}()
+  const isEdit = Boolean(record)
+
+  const {{
+    register,
+    handleSubmit,
+    reset,
+    formState: {{ errors }},
+  }} = useForm<FormValues>({{ resolver: zodResolver(schema) }})
+
+  // Reopening on a different record must not keep the previous values.
+  useEffect(() => {{
+    if (!open) return
+    reset({{
+{defaults}
+    }} as FormValues)
+  }}, [open, record, reset])
+
+  if (!open) return null
+
+  const pending = createMutation.isPending || updateMutation.isPending
+
+  const onSubmit = (values: FormValues) => {{
+    const done = {{ onSuccess: () => {{ onClose(); reset() }} }}
+    if (record) updateMutation.mutate({{ id: record.id, ...values }}, done)
+    else createMutation.mutate(values, done)
+  }}
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label={{isEdit ? 'Edit {spec.label}' : 'Create {spec.label}'}}
+      style={{{{
+        position: 'fixed', inset: 0, zIndex: 50,
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        background: 'rgba(27,28,30,0.32)',
+      }}}}
+      onClick={{onClose}}
+    >
+      <div
+        onClick={{(e) => e.stopPropagation()}}
+        style={{{{
+          width: 'min(460px, calc(100vw - 32px))',
+          background: 'white', borderRadius: 14,
+          border: '1px solid #e2e3e3',
+          boxShadow: '0 8px 24px rgba(27,28,30,0.12)',
+          padding: 20,
+        }}}}
+      >
+        <h2 style={{{{ fontSize: 15, fontWeight: 600, color: '#1b1c1e', marginBottom: 16 }}}}>
+          {{isEdit ? 'Edit {spec.label}' : 'Create {spec.label}'}}
+        </h2>
+
+        <form
+          onSubmit={{handleSubmit(onSubmit)}}
+          style={{{{ display: 'flex', flexDirection: 'column', gap: 14 }}}}
+        >
+{fields_jsx}
+
+          <div style={{{{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 4 }}}}>
+            <button
+              type="button"
+              onClick={{onClose}}
+              style={{{{
+                fontSize: 13, padding: '8px 14px', borderRadius: 10,
+                border: '1px solid #e2e3e3', background: 'transparent',
+                color: '#44474a', cursor: 'pointer', fontFamily: 'inherit',
+              }}}}
+            >
+              Cancel
+            </button>
+            <button type="submit" disabled={{pending}} className="btn-primary">
+              {{pending && <Loader2 size={{14}} className="animate-spin" />}}
+              {{isEdit ? 'Save' : 'Create'}}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  )
+}}
+'''
+
+
+def _fe_register_type(spec: ModuleSpec, fe_root: Path, dry_run: bool) -> str:
+    path = fe_root / "src" / "shared" / "api" / "types.ts"
+    if not path.exists():
+        return "types.ts not found — add the interface by hand"
+    text = path.read_text()
+    if f"export interface {spec.class_name} " in text:
+        return "type already declared"
+    if not dry_run:
+        path.write_text(text.rstrip() + "\n\n" + render_fe_types(spec))
+    return "type added"
+
+
+def render_fe_route(spec: ModuleSpec) -> str:
+    """A lazy route, wrapped the way every other page in the app is.
+
+    Skipping PermissionRoute would let anyone open the page by typing the
+    URL, even though every endpoint behind it refuses them. Skipping
+    WithLayout renders the page with no sidebar or top bar.
+    """
+    plural_pascal = "".join(w.capitalize() for w in spec.plural.split("_"))
+    return f"""  {{
+    path: '{spec.route_prefix}',
+    lazy: async () => {{
+      const {{ {plural_pascal}Page }} = await import('../pages/{spec.singular}')
+      return {{
+        Component: () => (
+          <WithLayout>
+            <PermissionRoute permission="{spec.permission("read")}">
+              <{plural_pascal}Page />
+            </PermissionRoute>
+          </WithLayout>
+        ),
+      }}
+    }},
+  }},
+"""
+
+
+def _fe_register_route(spec: ModuleSpec, fe_root: Path, dry_run: bool) -> str:
+    """Add the route. Unrouted, the page exists but cannot be opened."""
+    path = fe_root / "src" / "app" / "router.tsx"
+    if not path.exists():
+        return "router.tsx not found — add the route by hand"
+    text = path.read_text()
+    if f"path: '{spec.route_prefix}'" in text:
+        return "route already present"
+
+    # Insert before the catch-all, which must stay last or it swallows
+    # every route declared after it.
+    anchor = "  {\n    path: '*',"
+    if anchor not in text:
+        return "could not find the catch-all route — add the route by hand"
+    if not dry_run:
+        path.write_text(text.replace(anchor, render_fe_route(spec) + anchor, 1))
+    return "route registered"
+
+
+def generate_frontend(spec: ModuleSpec, fe_root: Path, dry_run: bool = False) -> list[str]:
+    """Write the page, modal, queries, and barrel file."""
+    if not (fe_root / "src").is_dir():
+        raise RuntimeError(f"{fe_root} does not look like the frontend repo")
+
+    page_dir = fe_root / "src" / "pages" / spec.singular
+
+    targets = {
+        fe_root / "src" / "features" / spec.singular / "queries.ts":
+            render_fe_queries(spec),
+        page_dir / "index.tsx": render_fe_page(spec),
+        page_dir / "components" / f"{spec.class_name}Modal.tsx":
+            render_fe_modal(spec),
+    }
+
+    clashes = [p for p in targets if p.exists()]
+    if clashes:
+        raise FileExistsError(
+            "refusing to overwrite:\n  "
+            + "\n  ".join(str(p.relative_to(fe_root)) for p in clashes)
+        )
+
+    summary = []
+    for path, content in targets.items():
+        if not dry_run:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(content)
+        summary.append(f"  + {path.relative_to(fe_root)}")
+
+    summary.append(f"  ~ src/shared/api/types.ts — {_fe_register_type(spec, fe_root, dry_run)}")
+    summary.append(f"  ~ src/app/router.tsx — {_fe_register_route(spec, fe_root, dry_run)}")
+    return summary
 
 
 if __name__ == "__main__":
