@@ -88,6 +88,16 @@ SEED_PERMISSIONS = [
      "group": "Users", "description": "Approve pending accounts and access requests."},
     {"slug": "settings.approve", "name": "Approve setting changes", "module": "settings", "action": "approve",
      "group": "Platform", "description": "Sign off changes that need a second pair of eyes."},
+    # ── Reference data ──
+    {"slug": "category.read", "name": "View categories", "module": "category", "action": "read",
+     "group": "Reference Data", "description": "See category groups and their items."},
+    {"slug": "category.create", "name": "Create categories", "module": "category", "action": "create",
+     "group": "Reference Data", "description": "Add a category group or an item inside one."},
+    {"slug": "category.update", "name": "Edit categories", "module": "category", "action": "update",
+     "group": "Reference Data", "description": "Rename, reorder, deprecate, or restore an item."},
+    {"slug": "category.delete", "name": "Delete categories", "module": "category", "action": "delete",
+     "group": "Reference Data", "description": "Remove a category that nothing references.",
+     "is_dangerous": True},
 ]
 
 
@@ -103,6 +113,7 @@ MODULE_LABELS = {
     "menu": "Menu Management",
     "settings": "Settings",
     "notifications": "Notifications",
+    "category": "Reference Data",
     "audit": "Audit Log",
     "dashboard": "Dashboard",
     "profile": "Profile",
@@ -111,7 +122,7 @@ MODULE_LABELS = {
 # Order the rows so the resources an admin touches most sit at the top.
 MODULE_ORDER = [
     "users", "roles", "permissions", "menu",
-    "settings", "notifications", "audit", "dashboard", "profile",
+    "settings", "notifications", "category", "audit", "dashboard", "profile",
 ]
 
 

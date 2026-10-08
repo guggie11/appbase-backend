@@ -366,9 +366,10 @@ async def create_{sing}(
     row = await service.create_{sing}(db, payload)
     with contextlib.suppress(Exception):
         await log_action(
-            db, action="{sing}.create", actor_id=current_user.get("sub"),
-            resource_id=str(row.id), request=request,
+            db, user_id=current_user.get("sub"), action="create",
+            module="{plur}", entity_id=str(row.id), request=request,
         )
+        await db.commit()
     return SuccessResponse(data=row)
 
 
@@ -392,9 +393,10 @@ async def update_{sing}(
     row = await service.update_{sing}(db, {sing}_id, payload)
     with contextlib.suppress(Exception):
         await log_action(
-            db, action="{sing}.update", actor_id=current_user.get("sub"),
-            resource_id=str({sing}_id), request=request,
+            db, user_id=current_user.get("sub"), action="update",
+            module="{plur}", entity_id=str({sing}_id), request=request,
         )
+        await db.commit()
     return SuccessResponse(data=row)
 
 
@@ -408,9 +410,10 @@ async def delete_{sing}(
     await service.delete_{sing}(db, {sing}_id)
     with contextlib.suppress(Exception):
         await log_action(
-            db, action="{sing}.delete", actor_id=current_user.get("sub"),
-            resource_id=str({sing}_id), request=request,
+            db, user_id=current_user.get("sub"), action="delete",
+            module="{plur}", entity_id=str({sing}_id), request=request,
         )
+        await db.commit()
     return SuccessResponse(data={{"deleted": True}})
 '''
 

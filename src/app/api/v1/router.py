@@ -2,6 +2,7 @@ from fastapi import APIRouter
 
 from app.api.v1.audit_logs import router as audit_logs_router
 from app.api.v1.auth.router import router as auth_router
+from app.api.v1.categories.router import router as categories_router
 from app.api.v1.dashboard import router as dashboard_router
 from app.api.v1.menus import router as menus_router
 from app.api.v1.notifications import router as notifications_router
@@ -14,6 +15,7 @@ from app.api.v1.users.router import router as users_router
 router = APIRouter()
 router.include_router(auth_router)
 router.include_router(users_router)
+router.include_router(categories_router)
 router.include_router(roles_router)
 router.include_router(permissions_router)
 router.include_router(menus_router)
