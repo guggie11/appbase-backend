@@ -1,5 +1,6 @@
 """Seed data: default roles, permissions, and app settings."""
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.rbac import Permission, Role, RolePermission
@@ -216,7 +217,13 @@ async def seed_permissions(db: AsyncSession) -> None:
             existing.is_dangerous = pdata.get("is_dangerous", False)
         else:
             db.add(Permission(**pdata))
-    await db.commit()
+        # Commit per row: with several workers starting together, a clash on
+        # one slug would otherwise discard every other row in the batch.
+        try:
+            await db.commit()
+        except IntegrityError:
+            # Another worker inserted it first — that is the desired state.
+            await db.rollback()
 
 
 async def seed_roles(db: AsyncSession) -> None:
@@ -229,7 +236,10 @@ async def seed_roles(db: AsyncSession) -> None:
             existing.kind = rdata["kind"]
         else:
             db.add(Role(**rdata))
-    await db.commit()
+        try:
+            await db.commit()
+        except IntegrityError:
+            await db.rollback()
 
 
 async def seed_role_permissions(db: AsyncSession) -> None:
