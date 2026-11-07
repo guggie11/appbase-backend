@@ -9,6 +9,7 @@ from datetime import datetime
 import pytest_asyncio
 from fakeredis import aioredis as fake_aioredis
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy import event, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.models.base import Base
@@ -24,6 +25,16 @@ test_engine = create_async_engine(
     connect_args={"check_same_thread": False},
 )
 
+# SQLite ignores foreign keys unless asked. Without this every ON DELETE
+# RESTRICT in the schema is decoration, and tests asserting that a referenced
+# row cannot be deleted pass while the database happily deletes it.
+@event.listens_for(test_engine.sync_engine, "connect")
+def _enforce_sqlite_foreign_keys(dbapi_connection, _record):
+    cursor = dbapi_connection.cursor()
+    cursor.execute("PRAGMA foreign_keys=ON")
+    cursor.close()
+
+
 TestSessionLocal: async_sessionmaker[AsyncSession] = async_sessionmaker(
     bind=test_engine,
     class_=AsyncSession,
@@ -38,6 +49,7 @@ TestSessionLocal: async_sessionmaker[AsyncSession] = async_sessionmaker(
 async def create_tables():
     # Import all models so metadata is populated
     import app.models.audit  # noqa: F401
+    import app.models.category  # noqa: F401
     import app.models.menu  # noqa: F401
     import app.models.rbac  # noqa: F401
     import app.models.token  # noqa: F401
@@ -47,6 +59,7 @@ async def create_tables():
         await conn.run_sync(Base.metadata.create_all)
     yield
     async with test_engine.begin() as conn:
+        await conn.execute(text("PRAGMA foreign_keys=OFF"))
         await conn.run_sync(Base.metadata.drop_all)
 
 

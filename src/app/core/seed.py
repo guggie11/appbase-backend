@@ -1,5 +1,6 @@
 """Seed data: default roles, permissions, and app settings."""
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.rbac import Permission, Role, RolePermission
@@ -88,6 +89,16 @@ SEED_PERMISSIONS = [
      "group": "Users", "description": "Approve pending accounts and access requests."},
     {"slug": "settings.approve", "name": "Approve setting changes", "module": "settings", "action": "approve",
      "group": "Platform", "description": "Sign off changes that need a second pair of eyes."},
+    # ── Reference data ──
+    {"slug": "category.read", "name": "View categories", "module": "category", "action": "read",
+     "group": "Reference Data", "description": "See category groups and their items."},
+    {"slug": "category.create", "name": "Create categories", "module": "category", "action": "create",
+     "group": "Reference Data", "description": "Add a category group or an item inside one."},
+    {"slug": "category.update", "name": "Edit categories", "module": "category", "action": "update",
+     "group": "Reference Data", "description": "Rename, reorder, deprecate, or restore an item."},
+    {"slug": "category.delete", "name": "Delete categories", "module": "category", "action": "delete",
+     "group": "Reference Data", "description": "Remove a category that nothing references.",
+     "is_dangerous": True},
 ]
 
 
@@ -103,6 +114,7 @@ MODULE_LABELS = {
     "menu": "Menu Management",
     "settings": "Settings",
     "notifications": "Notifications",
+    "category": "Reference Data",
     "audit": "Audit Log",
     "dashboard": "Dashboard",
     "profile": "Profile",
@@ -111,7 +123,7 @@ MODULE_LABELS = {
 # Order the rows so the resources an admin touches most sit at the top.
 MODULE_ORDER = [
     "users", "roles", "permissions", "menu",
-    "settings", "notifications", "audit", "dashboard", "profile",
+    "settings", "notifications", "category", "audit", "dashboard", "profile",
 ]
 
 
@@ -205,7 +217,13 @@ async def seed_permissions(db: AsyncSession) -> None:
             existing.is_dangerous = pdata.get("is_dangerous", False)
         else:
             db.add(Permission(**pdata))
-    await db.commit()
+        # Commit per row: with several workers starting together, a clash on
+        # one slug would otherwise discard every other row in the batch.
+        try:
+            await db.commit()
+        except IntegrityError:
+            # Another worker inserted it first — that is the desired state.
+            await db.rollback()
 
 
 async def seed_roles(db: AsyncSession) -> None:
@@ -218,7 +236,10 @@ async def seed_roles(db: AsyncSession) -> None:
             existing.kind = rdata["kind"]
         else:
             db.add(Role(**rdata))
-    await db.commit()
+        try:
+            await db.commit()
+        except IntegrityError:
+            await db.rollback()
 
 
 async def seed_role_permissions(db: AsyncSession) -> None:
