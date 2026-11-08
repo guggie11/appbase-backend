@@ -26,6 +26,7 @@ async def lifespan(app: FastAPI):
     try:
         from app.core.database import AsyncSessionLocal
         from app.core.seed import (
+            seed_menus,
             seed_permissions,
             seed_role_permissions,
             seed_roles,
@@ -38,6 +39,9 @@ async def lifespan(app: FastAPI):
             # Must run after both: this is what actually grants rights.
             await seed_role_permissions(db)
             await seed_settings(db)
+            # After permissions: every entry points at one, and a fresh
+            # install without a menu is an install with no way in.
+            await seed_menus(db)
     except Exception as exc:
         # Startup must still succeed without a database (tests, or a first
         # boot before the DB is healthy). But swallowing this silently gave a
