@@ -1,4 +1,6 @@
-"""Seed data: default roles, permissions, and app settings."""
+"""Seed data: default roles, permissions, menu, and app settings."""
+import uuid
+
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -292,3 +294,89 @@ async def seed_settings(db: AsyncSession) -> None:
             setting = AppSetting(id=uuid.uuid4(), **sdata)
             db.add(setting)
     await db.commit()
+
+
+# ---------------------------------------------------------------------------
+# Default menu
+# ---------------------------------------------------------------------------
+# A fresh install used to receive no menu at all: the rows were created by
+# hand on staging, so nobody noticed until a clean clone of v1.4.0 logged in
+# and found a single entry. Permissions without a way to reach them are not
+# an application.
+#
+# `parent` refers to another entry's path; order follows the sidebar.
+SEED_MENUS = [
+    {"label": "Dashboard", "path": "/dashboard", "icon": "LayoutDashboard",
+     "parent": None, "order_index": 0, "required_permission": None},
+    {"label": "Profile", "path": "/profile", "icon": "User",
+     "parent": None, "order_index": 1, "required_permission": None},
+    {"label": "Administration", "path": "/administration", "icon": "ShieldCheck",
+     "parent": None, "order_index": 2, "required_permission": None},
+    {"label": "Users", "path": "/users", "icon": "Users",
+     "parent": "/administration", "order_index": 1, "required_permission": "users.read"},
+    {"label": "Roles & Permissions", "path": "/roles", "icon": "Shield",
+     "parent": "/administration", "order_index": 2, "required_permission": "roles.read"},
+    # menu.read, not menu.manage: the catch-all was split into CRUD in v1.3
+    # and a new install should not be born using the slug being phased out.
+    {"label": "Menu Management", "path": "/menus", "icon": "Menu",
+     "parent": "/administration", "order_index": 3, "required_permission": "menu.read"},
+    {"label": "Appearance", "path": "/appearance", "icon": "Palette",
+     "parent": "/administration", "order_index": 4, "required_permission": "settings.read"},
+    {"label": "Settings", "path": "/settings", "icon": "Settings",
+     "parent": "/administration", "order_index": 5, "required_permission": "settings.read"},
+    {"label": "Audit Log", "path": "/audit-logs", "icon": "ClipboardList",
+     "parent": "/administration", "order_index": 6, "required_permission": "audit.read"},
+]
+
+
+async def seed_menus(db: AsyncSession) -> None:
+    """Create the default menu, matching on path so it never duplicates.
+
+    Runs on every boot and on existing deployments that already hold these
+    rows, so an insert-only pass would double them.
+    """
+    from app.models.menu import Menu
+
+    existing = {
+        m.path: m
+        for m in (await db.execute(select(Menu))).scalars().all()
+        if m.path
+    }
+
+    # Parents first: a child cannot reference an id that does not exist yet.
+    for entry in sorted(SEED_MENUS, key=lambda e: e["parent"] is not None):
+        if entry["path"] in existing:
+            continue
+
+        parent_id = None
+        if entry["parent"]:
+            parent = existing.get(entry["parent"])
+            if parent is None:
+                # Parent missing and not seeded either — skip rather than
+                # silently promote this entry to the top level.
+                continue
+            parent_id = parent.id
+
+        menu = Menu(
+            id=uuid.uuid4(),
+            label=entry["label"],
+            path=entry["path"],
+            icon=entry["icon"],
+            parent_id=parent_id,
+            order_index=entry["order_index"],
+            is_active=True,
+            required_permission=entry["required_permission"],
+        )
+        db.add(menu)
+        try:
+            await db.commit()
+            await db.refresh(menu)
+            existing[entry["path"]] = menu
+        except IntegrityError:
+            # Another worker inserted it first — the desired state either way.
+            await db.rollback()
+            found = (
+                await db.execute(select(Menu).where(Menu.path == entry["path"]))
+            ).scalar_one_or_none()
+            if found is not None:
+                existing[entry["path"]] = found

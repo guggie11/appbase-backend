@@ -32,7 +32,10 @@ def upgrade() -> None:
         sa.text("SELECT parent_id, order_index FROM menus WHERE path = '/settings'")
     ).first()
     if settings is None:
-        # No seeded admin menu on this deployment; nothing to attach to.
+        # A fresh install has no menu yet, so there is nothing to attach to.
+        # That gap is filled by c8a7b6d5e4f3, which seeds the whole default
+        # menu including Appearance; this migration only serves deployments
+        # that already had a hand-built menu when it first ran.
         return
 
     parent_id, order_index = settings

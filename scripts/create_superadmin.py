@@ -69,6 +69,7 @@ async def create_superadmin(
 
     if role is None and seed_if_missing:
         from app.core.seed import (
+            seed_menus,
             seed_permissions,
             seed_role_permissions,
             seed_roles,
@@ -79,6 +80,8 @@ async def create_superadmin(
         await seed_roles(db)
         await seed_role_permissions(db)
         await seed_settings(db)
+        # The admin this script creates needs somewhere to go once logged in.
+        await seed_menus(db)
         role = (
             await db.execute(select(Role).where(Role.slug == SUPER_ADMIN_SLUG))
         ).scalar_one_or_none()

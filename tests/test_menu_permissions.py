@@ -19,7 +19,9 @@ async def _menu(db, label, *, path=None, permission=None, parent_id=None, order=
     row = Menu(
         id=uuid.uuid4(),
         label=label,
-        path=path or f"/{label.lower()}",
+        # Unique: the suite shares one database and the seeded menu already
+        # owns /administration, /users and friends.
+        path=path or f"/{label.lower()}-{uuid.uuid4().hex[:8]}",
         parent_id=parent_id,
         order_index=order,
         is_active=True,
@@ -113,7 +115,11 @@ async def test_parent_survives_when_a_child_is_visible(test_db):
 
 @pytest.mark.asyncio
 async def test_parent_hidden_when_no_child_is_visible(test_db):
-    """The rescue must be narrow: an empty branch is clutter."""
+    """The rescue must be narrow: an empty branch is clutter.
+
+    Matched by id, not by label: the seeded menu also has an Administration
+    entry, and that one is public by design.
+    """
     parent = await _menu(test_db, "Administration", permission="settings.manage")
     await _menu(test_db, "Users", permission="users.read", parent_id=parent.id)
     await test_db.commit()
@@ -122,7 +128,17 @@ async def test_parent_hidden_when_no_child_is_visible(test_db):
         test_db, user_id=str(uuid.uuid4()), user_roles=[], is_super_admin=False,
         permissions=["dashboard.read"],
     )
-    assert "Administration" not in _labels(tree)
+
+    def ids(nodes):
+        # get_my_menu returns dicts, not model instances.
+        out = []
+        for n in nodes:
+            out.append(str(n["id"] if isinstance(n, dict) else n.id))
+            children = n.get("children") if isinstance(n, dict) else n.children
+            out.extend(ids(children or []))
+        return out
+
+    assert str(parent.id) not in ids(tree)
 
 
 @pytest.mark.asyncio
